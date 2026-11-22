@@ -1,0 +1,349 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-gray-200;
+  }
+
+  body {
+    @apply bg-white text-gray-900 antialiased;
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-primary {
+    @apply btn bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500;
+  }
+
+  .btn-secondary {
+    @apply btn bg-gray-100 text-gray-900 hover:bg-gray-200 focus:ring-gray-500;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+  }
+
+  .btn-success {
+    @apply btn bg-green-600 text-white hover:bg-green-700 focus:ring-green-500;
+  }
+
+  .btn-outline {
+    @apply btn border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-gray-500;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-gray-600 hover:bg-gray-100 focus:ring-gray-500;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all duration-200;
+  }
+
+  .select {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all duration-200;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-gray-700 mb-1.5;
+  }
+
+  .card {
+    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
+  }
+
+  .table-container {
+    @apply overflow-x-auto rounded-lg border border-gray-200;
+  }
+
+  .table {
+    @apply w-full text-sm text-left text-gray-700;
+  }
+
+  .table th {
+    @apply px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b border-gray-200;
+  }
+
+  .table td {
+    @apply px-4 py-3 border-b border-gray-100;
+  }
+
+  .table tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .table tr:hover td {
+    @apply bg-gray-50;
+  }
+
+  .table tr.highlighted td {
+    @apply bg-yellow-100;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-green-100 text-green-700;
+  }
+
+  .badge-danger {
+    @apply badge bg-red-100 text-red-700;
+  }
+
+  .badge-warning {
+    @apply badge bg-yellow-100 text-yellow-700;
+  }
+
+  .badge-primary {
+    @apply badge bg-blue-100 text-blue-700;
+  }
+
+  .announcement-bar {
+    @apply w-full py-2 px-4 text-sm font-medium text-center;
+  }
+
+  .announcement-red {
+    @apply announcement-bar bg-red-50 text-red-700 border-b border-red-200;
+  }
+
+  .announcement-green {
+    @apply announcement-bar bg-green-50 text-green-700 border-b border-green-200;
+  }
+
+  .section-title {
+    @apply text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2;
+  }
+
+  .section-title-icon {
+    @apply w-5 h-5 text-blue-600;
+  }
+
+  .floating-btn {
+    @apply fixed bottom-6 z-50 rounded-full shadow-lg p-3 transition-all duration-300 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-offset-2;
+  }
+
+  .floating-btn-whatsapp {
+    @apply floating-btn right-6 bg-green-500 text-white hover:bg-green-600 focus:ring-green-500;
+  }
+
+  .page-container {
+    @apply min-h-screen flex flex-col;
+  }
+
+  .main-content {
+    @apply flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8;
+  }
+
+  .admin-layout {
+    @apply min-h-screen bg-gray-50 flex;
+  }
+
+  .admin-sidebar {
+    @apply fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 lg:translate-x-0;
+  }
+
+  .admin-sidebar-collapsed {
+    @apply -translate-x-full;
+  }
+
+  .admin-main {
+    @apply flex-1 lg:ml-64 min-w-0;
+  }
+
+  .admin-header {
+    @apply sticky top-0 z-30 bg-white border-b border-gray-200;
+  }
+
+  .admin-content {
+    @apply p-6;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  .animate-slide-down {
+    animation: slideDown 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+/* ============================================================
+   ADMIN PANEL SCROLLBARS — drawn in the panel's own palette
+   ============================================================ */
+html:has(.admin-layout) {
+  scrollbar-width: thin;
+  scrollbar-color: #2563eb #e6ecf5;
+}
+html:has(.admin-layout)::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+html:has(.admin-layout)::-webkit-scrollbar-track {
+  background: #e6ecf5;
+}
+html:has(.admin-layout)::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 3px solid #e6ecf5;
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+}
+html:has(.admin-layout)::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #2563eb, #1e40af);
+}
+html:has(.admin-layout)::-webkit-scrollbar-corner {
+  background: #e6ecf5;
+}
+.admin-layout * {
+  scrollbar-width: thin;
+  scrollbar-color: #3b82f6 #eef2f8;
+}
+.admin-layout *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.admin-layout *::-webkit-scrollbar-track {
+  background: #eef2f8;
+}
+.admin-layout *::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid #eef2f8;
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+}
+.admin-layout *::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+}
+
+/* ============================================================
+   RED-EYED DRAGON LOGO — glossy 3D emblem with red glow
+   ============================================================ */
+.dragon-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 24px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: radial-gradient(
+    120% 90% at 30% 0%,
+    #ffffff 0%,
+    #f6ece9 40%,
+    #e3cdc6 75%,
+    #caa9a0 100%
+  );
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, 0.9),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.25),
+    0 6px 12px rgba(0, 0, 0, 0.35),
+    0 0 24px rgba(220, 38, 38, 0.55),
+    /* eye-catching red glow */ 0 16px 28px rgba(0, 0, 0, 0.25);
+  transform: perspective(700px) rotateX(4deg);
+}
+
+.dragon-img {
+  width: 84%;
+  height: 84%;
+  object-fit: contain;
+  mix-blend-mode: multiply; /* melts the white image background into the badge */
+  filter: drop-shadow(0 2px 1px rgba(255, 255, 255, 0.55))
+    drop-shadow(0 3px 5px rgba(127, 29, 29, 0.45));
+}
+
+/* glass shine sweeping the top of the badge */
+.dragon-gloss {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(255, 255, 255, 0.5) 30%,
+    rgba(255, 255, 255, 0.12) 48%,
+    rgba(255, 255, 255, 0) 62%
+  );
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+/* polished rim with a red inner line */
+.dragon-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(153, 27, 27, 0.35);
+  pointer-events: none;
+}
+
+@media (max-width: 480px) {
+  .dragon-badge {
+    width: 68px;
+    height: 68px;
+    border-radius: 16px;
+  }
+}
