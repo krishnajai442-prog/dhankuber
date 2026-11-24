@@ -7,7 +7,7 @@ import connectDB from "@/lib/mongodb";
 import Chart from "@/models/Chart";
 import { verifyToken } from "@/lib/auth";
 import { chartFilterSchema, chartSchema } from "@/lib/validations";
-import { canonicalMarketName, escapeRegExp, marketKey } from "@/lib/markets";
+import { canonicalMarketName, escapeRegExp, marketKey, SPECIAL_MARKETS } from "@/lib/markets";
 
 function formatChartDate(date: number, month: number, year: number): string {
   return `${String(date).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`;
@@ -49,6 +49,18 @@ export async function GET(request: NextRequest) {
     if (month) query.month = month;
     if (year) query.year = year;
     if (isActive && isActive !== "all") query.isActive = isActive === "true";
+
+    // Special 4 view: only the permanent special tables (any date).
+    if (searchParams.get("special") === "1") {
+      query.$or = SPECIAL_MARKETS.map((n) => ({
+        chartName: { $regex: `^${escapeRegExp(n)}$`, $options: "i" },
+      }));
+    }
+        if (searchParams.get("special") === "1") {
+      query.$or = SPECIAL_MARKETS.map((n) => ({
+        chartName: { $regex: `^${escapeRegExp(n)}$`, $options: "i" },
+      }));
+    }
 
     const latestOnly = searchParams.get("latest") === "1";
 

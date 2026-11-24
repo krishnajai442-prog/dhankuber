@@ -3,6 +3,11 @@
 
 /* ------------------------------- constants ------------------------------- */
 
+/** The 4 permanent "special" tables (monthly chart columns; admin may backfill past dates). */
+export const SPECIAL_MARKETS = ["Gali", "Desawar", "Faridabad", "Ghaziabad"];
+/** Slug mirrors of SPECIAL_MARKETS — keep both lists in sync. */
+export const SPECIAL_SLUGS = ["gali", "desawar", "faridabad", "ghaziabad"];
+
 export const teamNames: string[] = [
   "Gali Gharana", "Desawar Dabangs", "Faridabad Fauj", "Ghaziabad Gurkhas", "Delhi Dilwale", "Mumbai Maharajas", "Kolkata Kohinoors", "Chennai Chakravartis",
   "Bangalore Bahubalis", "Hyderabad Hanumans", "Pune Peshwas", "Ahmedabad Ashokas", "Jaipur Jantars", "Lucknow Lavas", "Kanpur Kesaris", "Nagpur Nagas",
@@ -19,10 +24,10 @@ export const teamNames: string[] = [
   "Belgaum Brahmos", "Ambattur Avatars", "Tirunelveli Thalapathis", "Malegaon Mavlas", "Gaya Gautams", "Jalgaon Jujhars", "Udaipur Udayans", "Maheshtala Mahadevs",
 ];
 
-/** Default markets = team names (so the home table shows a row for each team). */
+/** Default markets = team names (home daily table shows a row for each team). */
 export const DEFAULT_MARKETS = teamNames;
 
-/** Highlighting is 100% admin-controlled — nothing is highlighted by default. */
+/** Legacy: highlighting is 100% admin-controlled, so nothing is highlighted by default. */
 export const MAJOR_SLUGS: string[] = [];
 
 export const MONTH_NAMES = [
@@ -34,9 +39,9 @@ export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** Legacy grace window (kept for compatibility). */
 export const GRACE_MINUTES = 10;
-/** Shown when the draw time has passed but no admin result exists (on/after generation). */
+/** Draw time passed but no admin result. */
 export const MISSING_MARK = "--";
-/** Shown for upcoming draws (time not reached). Set to "❌" if you prefer the emoji. */
+/** Upcoming draw (time not reached). Set to "❌" if you prefer the emoji. */
 export const UPCOMING_MARK = "XX";
 
 /** LIVE = already drawn today; NEXT = upcoming within 6h; REST = later. */
@@ -76,14 +81,9 @@ export function escapeRegExp(s: string): string {
 
 /* -------------------------------- drawing -------------------------------- */
 
-/**
- * Reference schedule exactly as shown on the reference site (24h HH:MM).
- * Markets that share a time there keep sharing it here ("same time for 2+ tables").
- */
+/** Reference schedule exactly as shown on the reference site (24h HH:MM). */
 const REFERENCE_DRAW_TIMES: Record<string, string> = {
-  // Early morning / morning
   "noida-king": "01:15", "bikaner-super": "02:20", desawar: "05:00", "chotta-bazar": "05:30", "new-punjab": "11:10",
-  // Early afternoon
   "royal-bazar": "13:15", "gaj-kesri": "13:15", "super-king": "13:45", "matka-sone-ka": "13:55",
   "up-king": "14:00", "agra-bazar": "14:00", "rajdhani-jaipur": "14:00", "janta-city": "14:00",
   "mumbai-bazaar": "14:00", "ujala-super": "14:00", "new-jaipur-king": "14:00",
@@ -91,20 +91,16 @@ const REFERENCE_DRAW_TIMES: Record<string, string> = {
   "matka-king": "14:15", "jd-durga": "14:15", "jaipur-king": "14:20",
   "kalka-bazar": "14:30", savera: "14:30", "super-delhi": "14:30", "delhi-city": "14:30",
   "deep-sagar": "14:40", "delhi-dream": "14:40", "super-taj": "14:40", "meerut-metro": "14:45",
-  // Mid afternoon
   mohali: "15:00", "delhi-bazar": "15:00", "meerut-city": "15:00", "new-taj": "15:00", "new-delhi-darbar": "15:00",
   chennai: "15:05", "royal-challenge": "15:10", taj: "15:15", "super-bazar": "15:15", "delhi-bazar-day": "15:15",
   anarkali: "15:30", "maa-bhagwati": "15:30", "dubai-delhi": "15:45",
-  // Late afternoon
   "udaan-king": "16:00", "shiv-shakti": "16:05", "shri-ganesh": "16:30", "ghaziabad-din": "16:35", "shri-nagar": "16:35",
   "ds-number-1": "17:00", "mahalaxmi-bazar": "17:05", ahmedabad: "17:10", maharaj: "17:15", "uttarakhand-uk": "17:30",
-  // Evening
   faridabad: "18:00", "old-faridabad": "18:00", sadabahar: "18:00", "desawar-saam": "18:00", "old-ghaziabad": "18:00",
   "punjab-king": "19:15", neelkanth: "19:20",
   "shri-laxmi": "19:30", "old-city": "19:30", "mini-desawer": "19:30", "chotti-ghaziabad": "19:30",
   gurgaon: "19:35", "veera-king": "19:40", paras: "19:40", "farida-bazar": "19:40",
   "delhi-golden": "19:45", "mathura-city": "19:45", "dhan-kuber": "19:55", "bhavishyavani": "19:55",
-  // Night
   "shri-ji": "20:00", "shiv-shankar": "20:00", bharat: "20:00", nagpur: "20:00", "gali-bazar": "20:00",
   bangalore: "20:00", "punjab-laxmi": "20:00", "magadh-gold": "20:00",
   "vip-agra": "20:05", "mg-prime": "20:05",
@@ -129,30 +125,26 @@ function shiftTimes(times: Record<string, string>, deltaMinutes: number): Record
   return out;
 }
 
-/** Reference schedule − 30 minutes, for any legacy/reference-named markets. */
+/** Reference schedule − 30 minutes, for legacy/reference-named markets. */
 const DEFAULT_DRAW_TIMES: Record<string, string> = shiftTimes(REFERENCE_DRAW_TIMES, -30);
 
-/**
- * Schedule assigned to the team tables positionally, in alphabetical order, so the
- * top table (Agra Aadityas) draws at 01:30 PM and the reference's "same time for 2+
- * tables" groupings are preserved.
- */
+/** Team tables get the −30 min schedule positionally (alphabetical), preserving groupings. */
 const TEAM_SCHEDULE: string[] = [
-  "13:30", "13:30", "13:30", "13:30", "13:30", "13:30", "13:30",   // 7 tables @ 01:30 PM
-  "13:25", "13:15", "12:45", "12:45",                              // 01:25 / 01:15 / 12:45 ×2
-  "13:40", "13:40", "13:40", "13:45", "13:45", "13:50",            // 01:40 ×3 / 01:45 ×2 / 01:50
-  "14:00", "14:00", "14:00", "14:00", "14:10", "14:10", "14:10",   // 02:00 ×4 / 02:10 ×3
-  "14:15", "14:30", "14:30", "14:30", "14:30", "14:30", "14:35",   // 02:15 / 02:30 ×5 / 02:35
-  "14:40", "14:45", "14:45", "14:45", "15:00", "15:00", "15:15",   // 02:40 / 02:45 ×3 / 03:00 ×2 / 03:15
-  "15:30", "15:35", "16:00", "16:05", "16:05", "16:30", "16:35",   // 03:30 / 03:35 / 04:00 / 04:05 ×2 / 04:30 / 04:35
-  "16:40", "16:45", "17:00", "17:30", "17:30", "17:30", "17:30", "17:30", // 04:40 / 04:45 / 05:00 / 05:30 ×5
-  "18:45", "18:50", "19:00", "19:00", "19:00", "19:00", "19:05",   // 06:45 / 06:50 / 07:00 ×4 / 07:05
-  "19:10", "19:10", "19:10", "19:15", "19:15", "19:25", "19:25",   // 07:10 ×3 / 07:15 ×2 / 07:25 ×2
-  "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", // 07:30 ×8
-  "19:35", "19:35",                                                 // 07:35 ×2
-  "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", // 07:45 ×8
-  "19:50", "20:00", "20:00", "20:00", "20:05", "20:10",            // 07:50 / 08:00 ×3 / 08:05 / 08:10
-  "20:15", "20:15", "20:20", "20:30", "20:35",                     // 08:15 ×2 / 08:20 / 08:30 / 08:35
+  "13:30", "13:30", "13:30", "13:30", "13:30", "13:30", "13:30",
+  "13:25", "13:15", "12:45", "12:45",
+  "13:40", "13:40", "13:40", "13:45", "13:45", "13:50",
+  "14:00", "14:00", "14:00", "14:00", "14:10", "14:10", "14:10",
+  "14:15", "14:30", "14:30", "14:30", "14:30", "14:30", "14:35",
+  "14:40", "14:45", "14:45", "14:45", "15:00", "15:00", "15:15",
+  "15:30", "15:35", "16:00", "16:05", "16:05", "16:30", "16:35",
+  "16:40", "16:45", "17:00", "17:30", "17:30", "17:30", "17:30", "17:30",
+  "18:45", "18:50", "19:00", "19:00", "19:00", "19:00", "19:05",
+  "19:10", "19:10", "19:10", "19:15", "19:15", "19:25", "19:25",
+  "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", "19:30",
+  "19:35", "19:35",
+  "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", "19:45",
+  "19:50", "20:00", "20:00", "20:00", "20:05", "20:10",
+  "20:15", "20:15", "20:20", "20:30", "20:35",
 ];
 
 [...teamNames]
@@ -161,6 +153,7 @@ const TEAM_SCHEDULE: string[] = [
     DEFAULT_DRAW_TIMES[slugify(name)] = TEAM_SCHEDULE[i] ?? "12:00";
   });
 
+/** Admin-set time wins; otherwise the market's scheduled default. */
 export function getDrawTime(slug: string, dbTime?: string | null): string {
   if (dbTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(dbTime)) return dbTime;
   return DEFAULT_DRAW_TIMES[slug] || "12:00";
@@ -216,7 +209,7 @@ export function dateKey(y: number, m: number, d: number): number {
 
 /* ------------------------------ auto results ----------------------------- */
 
-/** Deterministic pseudo-random 2-digit value — used ONLY to backfill days before a market's generation. */
+/** Deterministic pseudo-random 2-digit value — backfill only, never today's reveal. */
 export function autoResult(seedKey: string, day: number, month: number, year: number): string {
   const seed = `${seedKey}-${day}-${month}-${year}`;
   let hash = 0;
@@ -274,13 +267,19 @@ export interface MonthlyRowData {
 }
 
 /**
- * Monthly rows (day 1 → today for the current month; full month for past months).
- * Value rule per cell:
- *   1. admin entry for that day           -> admin result
- *   2. day BEFORE the market's generation -> auto-generated 2-digit number (backfill)
- *   3. day ON/AFTER generation, past      -> "--" (no admin result)
- *   4. today                              -> "--" if draw time passed else "XX"
- *   5. future                             -> "XX"
+ * Monthly rows: day 1 → today for the current month, full month for past months,
+ * nothing for future months.
+ *
+ * Cell rules (first match wins):
+ *   1. admin entry with a non-blank result   → that result
+ *   2. past day + SPECIAL 4                  → auto 2-digit (always backfilled)
+ *   3. past day + before market's generation → auto 2-digit
+ *   4. past day + on/after generation        → "--"
+ *   5. today                                 → "--" once draw time passed, else "XX"
+ *   6. future day                            → "XX"
+ *
+ * Draw time used for today's gate: the TODAY entry's time wins; otherwise the
+ * newest day's time within the selected month; otherwise the scheduled default.
  */
 export function buildMonthlyRows(
   columns: Array<{ key: string }>,
@@ -290,15 +289,15 @@ export function buildMonthlyRows(
   nowMinutes: number,
   firstEntry: Map<string, number>
 ): MonthlyRowData[] {
-   const byKey = new Map<string, MonthChartLite>();
+  const byKey = new Map<string, MonthChartLite>();
   const timeBySlug = new Map<string, string>();
   const timeRank = new Map<string, number>();
   const isCurrentMonth = sel.year === today.year && sel.month === today.month;
+
   for (const c of charts) {
     const s = slugify(c.chartName);
     byKey.set(`${s}|${c.date}`, c);
     if (!c.drawTime) continue;
-    // TODAY's entry time wins; otherwise the newest day's time in this month.
     const rank = isCurrentMonth && c.date === today.day ? 1_000_000 : c.date;
     const prev = timeRank.get(s);
     if (prev === undefined || rank > prev) {
@@ -310,7 +309,6 @@ export function buildMonthlyRows(
   const dim = daysInMonth(sel.year, sel.month);
   const monthStart = new Date(sel.year, sel.month - 1, 1).getTime();
   const currentMonthStart = new Date(today.year, today.month - 1, 1).getTime();
-  // current month → rows 01…today; past month → full month; future month → none
   const lastDay = monthStart > currentMonthStart ? 0 : monthStart === currentMonthStart ? today.day : dim;
   const todayTime = new Date(today.year, today.month - 1, today.day).getTime();
 
@@ -319,21 +317,24 @@ export function buildMonthlyRows(
     const values: Record<string, string> = {};
     const cellTime = new Date(sel.year, sel.month - 1, day).getTime();
     const cellKey = dateKey(sel.year, sel.month, day);
+
     for (const col of columns) {
       const db = byKey.get(`${col.key}|${day}`);
       if (db && db.result && db.result.trim() !== "") {
         values[col.key] = db.result;
         continue;
       }
-      // Blank / pending entry → fall through to the generation / past / today rules.
+
+      // Blank / pending / no entry → backfill or placeholder rules.
+      const isSpecial = SPECIAL_SLUGS.includes(col.key);
       const gen = firstEntry.get(col.key);
-      // No entries yet → table is "created now": ALL past days are pre-creation → auto 2-digit.
-      // Has entries → only days strictly before its first entry are pre-creation → auto 2-digit.
       const beforeGeneration = gen === undefined ? cellTime < todayTime : cellKey < gen;
-      if (beforeGeneration) {
-        values[col.key] = autoResult(col.key, day, sel.month, sel.year);
-      } else if (cellTime < todayTime) {
-        values[col.key] = MISSING_MARK;
+
+      if (cellTime < todayTime) {
+        values[col.key] =
+          isSpecial || beforeGeneration
+            ? autoResult(col.key, day, sel.month, sel.year)
+            : MISSING_MARK;
       } else if (cellTime === todayTime) {
         const mins = minutesOf(getDrawTime(col.key, timeBySlug.get(col.key)));
         values[col.key] = nowMinutes >= mins ? MISSING_MARK : UPCOMING_MARK;
@@ -341,6 +342,7 @@ export function buildMonthlyRows(
         values[col.key] = UPCOMING_MARK;
       }
     }
+
     rows.push({ date: day, values, red: charts.some((c) => c.date === day && c.isHighlighted) });
   }
   return rows;
@@ -358,8 +360,11 @@ export interface CacheableChart {
   isHighlighted: boolean;
   isActive: boolean;
   drawTime?: string | null;
+  updatedAt?: string;
 }
+
 const CACHE_KEY = "skf-charts-cache-v1";
+
 function readCache(): Record<string, CacheableChart[]> {
   try {
     if (typeof window === "undefined") return {};
@@ -368,6 +373,7 @@ function readCache(): Record<string, CacheableChart[]> {
     return {};
   }
 }
+
 export function getCachedCharts(key: string): CacheableChart[] {
   try {
     return readCache()[key] || [];
@@ -375,7 +381,8 @@ export function getCachedCharts(key: string): CacheableChart[] {
     return [];
   }
 }
-/** A SUCCESSFUL response (even empty) is always stored so deletions propagate; failed fetches never touch the cache. */
+
+/** A SUCCESSFUL response (even empty) is stored so deletions propagate; failed fetches never touch the cache. */
 export function setCachedCharts(key: string, data: CacheableChart[]): void {
   try {
     if (typeof window === "undefined" || !Array.isArray(data)) return;
@@ -386,6 +393,7 @@ export function setCachedCharts(key: string, data: CacheableChart[]): void {
     /* storage blocked/full – ignore */
   }
 }
+
 /** Fetch with retries. Returns null ONLY when every attempt failed → caller keeps previous data. */
 export async function fetchChartsResilient(
   url: string,

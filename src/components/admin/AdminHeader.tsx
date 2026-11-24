@@ -19,9 +19,9 @@ export function AdminHeader({ onMenuClick, user, pageTitle, breadcrumbs = [] }: 
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-4">
-            <button
+              <button
               type="button"
-              onClick={onMenuClick}
+              onClick={() => window.dispatchEvent(new CustomEvent("admin-sidebar-toggle"))}
               className="lg:hidden p-2 rounded-lg text-gray-600 hover:bg-gray-100"
               aria-label="Open menu"
             >

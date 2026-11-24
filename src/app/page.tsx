@@ -7,11 +7,13 @@ import { MonthlyChartTable } from "@/components/home/MonthlyChartTable";
 import { FloatingButtons } from "@/components/home/FloatingButtons";
 import { Footer } from "@/components/layout/Footer";
 import {
-  DEFAULT_MARKETS, MAJOR_SLUGS, MONTH_NAMES, MONTH_SHORT, MISSING_MARK, UPCOMING_MARK,
+  DEFAULT_MARKETS, MONTH_NAMES, MONTH_SHORT, MISSING_MARK, UPCOMING_MARK,
   addDays, autoResult, buildMonthlyRows, dateKey, drawSection, firstEntryDates, fmtTimeLabel,
   fetchChartsResilient, getCachedCharts, getDrawTime, istNow, istToday, longDate, minutesOf,
-  ordinal, slugify, titleFromSlug, taglineYears, weekdayOf, DrawSection,
+  ordinal, slugify, taglineYears, weekdayOf, DrawSection,
 } from "@/lib/markets";
+
+/* ---------------------------------- types --------------------------------- */
 
 interface ApiChart {
   id: string;
@@ -38,6 +40,21 @@ type RowState = LiveRow & {
   section: DrawSection;
 };
 
+/* -------------------------------- constants ------------------------------- */
+
+/** PERMANENT special 4 — monthly chart columns, in the reference order. No dynamic selection. */
+const MONTHLY_COLUMNS = [
+  { key: "desawar", label: "DSWR" },
+  { key: "faridabad", label: "FRBD" },
+  { key: "ghaziabad", label: "GZBD" },
+  { key: "gali", label: "GALI" },
+];
+
+const SPECIAL_NAMES = "Gali, Desawar, Ghaziabad and Faridabad";
+
+/* --------------------------------- helpers -------------------------------- */
+
+/** Read ?month=&year= from the address bar. */
 function readSelFromUrl(): { month: number; year: number } | null {
   if (typeof window === "undefined") return null;
   const p = new URLSearchParams(window.location.search);
@@ -46,6 +63,8 @@ function readSelFromUrl(): { month: number; year: number } | null {
   if (m >= 1 && m <= 12 && y >= 2012 && y <= 2100) return { month: m, year: y };
   return null;
 }
+
+/* ---------------------------------- page ---------------------------------- */
 
 export default function HomePage() {
   /* ------------------------------ live IST clock ---------------------------- */
@@ -68,6 +87,7 @@ export default function HomePage() {
   const [allCharts, setAllCharts] = useState<ApiChart[]>([]);
   const [booted, setBooted] = useState(false);
 
+  // Inject localStorage cache BEFORE first paint so rows never flash/disappear.
   useLayoutEffect(() => {
     const t = getCachedCharts(todayKey);
     if (t.length) setTodayCharts(t as ApiChart[]);
@@ -107,38 +127,7 @@ export default function HomePage() {
   }, []);
 
   // Generation date per market (earliest entry) — drives the backfill rule.
-    const firstEntryBySlug = useMemo(() => firstEntryDates(allCharts), [allCharts]);
-
-   // The 4 tables with the MOST RECENT results become the monthly chart columns,
-  // labelled with their FULL market / team names.
-  const monthlyColumns = useMemo(() => {
-    const nameBySlug = new Map<string, string>();
-    for (const name of DEFAULT_MARKETS) nameBySlug.set(slugify(name), name);
-    for (const c of allCharts) nameBySlug.set(slugify(c.chartName), c.chartName);
-    const fullName = (s: string) => nameBySlug.get(s) ?? titleFromSlug(s);
-
-    const latest = new Map<string, { date: number; updated: number }>();
-    for (const c of allCharts) {
-      const s = slugify(c.chartName);
-      const d = dateKey(c.year, c.month, c.date);
-      const u = c.updatedAt ? new Date(c.updatedAt).getTime() : 0;
-      const prev = latest.get(s);
-      if (!prev || d > prev.date || (d === prev.date && u > prev.updated)) {
-        latest.set(s, { date: d, updated: u });
-      }
-    }
-    const ranked = Array.from(latest.entries())
-      .sort((a, b) => b[1].date - a[1].date || b[1].updated - a[1].updated || a[0].localeCompare(b[0]))
-      .slice(0, 4)
-      .map(([s]) => ({ key: s, label: fullName(s) }));
-    // Always show 4 columns: pad with default markets (full names) when DB has fewer.
-    for (const name of DEFAULT_MARKETS) {
-      if (ranked.length >= 4) break;
-      const s = slugify(name);
-      if (!ranked.some((c) => c.key === s)) ranked.push({ key: s, label: name });
-    }
-    return ranked.slice(0, 4);
-  }, [allCharts]);
+  const firstEntryBySlug = useMemo(() => firstEntryDates(allCharts), [allCharts]);
 
   /* ------------------------------- daily rows ------------------------------- */
   const sections = useMemo<LiveSection[]>(() => {
@@ -154,22 +143,23 @@ export default function HomePage() {
       }
       return bySlug.get(slug)!;
     };
+
     const absorb = (r: RowState, c: ApiChart) => {
       r.hasDb = true;
       if (c.isHighlighted) r.dbHighlight = true;
       r.dbTime = r.dbTime || c.drawTime;
     };
 
+    // Yesterday first (fallback time)…
     for (const c of yesterdayCharts) {
       const r = ensure(c.chartName);
       r.dbYesterday = c.result;
       absorb(r, c);
     }
-        for (const c of todayCharts) {
+    // …then TODAY: its admin-set draw time ALWAYS wins ("" = use default schedule).
+    for (const c of todayCharts) {
       const r = ensure(c.chartName);
       r.dbToday = c.result;
-      // TODAY's admin-set draw time ALWAYS wins over yesterday's / older times.
-      // Empty ("") means "use the default schedule", so it overrides old times too.
       r.dbTime = c.drawTime || null;
       absorb(r, c);
     }
@@ -181,7 +171,9 @@ export default function HomePage() {
       const s = slugify(c.chartName);
       const k = dateKey(c.year, c.month, c.date);
       const prev = meta.get(s);
-      if (!prev || k >= prev.key) meta.set(s, { name: c.chartName, drawTime: c.drawTime, highlighted: c.isHighlighted, key: k });
+      if (!prev || k >= prev.key) {
+        meta.set(s, { name: c.chartName, drawTime: c.drawTime, highlighted: c.isHighlighted, key: k });
+      }
     }
     for (const mm of Array.from(meta.values())) {
       const r = ensure(mm.name);
@@ -233,7 +225,7 @@ export default function HomePage() {
     if (!sel) return;
     let alive = true;
     const key = `m-${sel.year}-${sel.month}`;
-    setMonthCharts(getCachedCharts(key) as ApiChart[]);
+    setMonthCharts(getCachedCharts(key) as ApiChart[]); // instant from cache
     fetchChartsResilient(`/api/charts?year=${sel.year}&month=${sel.month}`, key).then((d) => {
       if (alive && d) setMonthCharts(d as ApiChart[]);
     });
@@ -241,11 +233,12 @@ export default function HomePage() {
   }, [sel]);
 
   const monthlyRows = useMemo(
-    () => (sel ? buildMonthlyRows(monthlyColumns, sel, monthCharts, today, nowMinutes, firstEntryBySlug) : []),
+    () => (sel ? buildMonthlyRows(MONTHLY_COLUMNS, sel, monthCharts, today, nowMinutes, firstEntryBySlug) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sel, monthCharts, monthlyColumns, firstEntryBySlug, minuteKey, today.day]
+    [sel, monthCharts, firstEntryBySlug, minuteKey, today.day]
   );
 
+  /** Full page navigation (reload) to the requested month. */
   const navigateMonth = (m: number, y: number) => {
     window.location.assign(`/?ResultFor=${MONTH_NAMES[m - 1]}-${y}&month=${m}&year=${y}#mix-chart`);
   };
@@ -255,15 +248,19 @@ export default function HomePage() {
   const prevDate = new Date(selYear, selMonth - 2, 1);
   const nextDate = new Date(selYear, selMonth, 1);
   const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-  const tagline = `Daily Superfast Dhan Kuber Result of ${ordinal(today.day)} ${MONTH_NAMES[today.month - 1]} ${today.year} And Leak Numbers for Ghaziabad and Faridabad With Complete Old Dhan Kuber Chart of ${taglineYears().join(", ")} From Dhan Kuber, Dhan Kuber Ghaziabad, Dhan Kuber Faridabad.`;
 
+  const tagline = `Daily Superfast Dhan Kuber Result of ${ordinal(today.day)} ${MONTH_NAMES[today.month - 1]} ${today.year} And Leak Numbers for ${SPECIAL_NAMES} With Complete Old Dhan Kuber Chart of ${taglineYears().join(", ")} From Dhan Kuber, Dhan Kuber Gali, Dhan Kuber Desawar, Dhan Kuber Ghaziabad, Dhan Kuber Faridabad.`;
+
+  /* --------------------------------- render -------------------------------- */
   return (
     <div className="flex min-h-screen flex-col bg-[#ececec]">
       <SiteHeader tagline={tagline} />
+
       <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 pb-16">
         <p suppressHydrationWarning className="mt-4 text-center text-sm text-[#16a34a]">
           Updated: {MONTH_NAMES[now.getMonth()]} {now.getDate()}, {now.getFullYear()}, {clock} IST.
         </p>
+
         <div className="mt-6 space-y-6">
           <LiveResultsTable
             banner={`Dhan Kuber Results of ${longDate(today)} & ${longDate(yesterday)}`}
@@ -272,22 +269,24 @@ export default function HomePage() {
             sections={booted ? sections : []}
             showFooter
           />
+
           <div className="bg-[#1565d8] px-4 py-3 text-center text-sm text-white sm:text-base">
             <span className="mr-1 font-bold text-[#ff8a80]">New:</span>
             Show your game at its original position of the next day
           </div>
+
           <div id="mix-chart">
-              <MonthlyChartTable
-              title={`Monthly Dhan Kuber Result Chart of ${MONTH_NAMES[selMonth - 1]} ${selYear} for Ghaziabad and Faridabad`}
-                            columns={monthlyColumns}
+            <MonthlyChartTable
+              title={`Monthly Dhan Kuber Result Chart of ${MONTH_NAMES[selMonth - 1]} ${selYear} for ${SPECIAL_NAMES}`}
+              columns={MONTHLY_COLUMNS}
               rows={monthlyRows}
               prevLabel={`${MONTH_SHORT[prevDate.getMonth()]} ${prevDate.getFullYear()}`}
               nextLabel={`${MONTH_SHORT[nextDate.getMonth()]} ${nextDate.getFullYear()}`}
               onPrev={() => navigateMonth(prevDate.getMonth() + 1, prevDate.getFullYear())}
               onNext={() => navigateMonth(nextDate.getMonth() + 1, nextDate.getFullYear())}
-              latestLabel={`Click here to view the latest chart for ${monthlyColumns.map((c) => c.label).join(", ")} for ${MONTH_NAMES[today.month - 1]}-${today.year}`}
+              latestLabel={`Click here to view the latest chart for ${SPECIAL_NAMES} for ${MONTH_NAMES[today.month - 1]}-${today.year}`}
               onLatest={() => navigateMonth(today.month, today.year)}
-              selectorLabel={`Select a month and year to view the combined chart for ${monthlyColumns.map((c) => c.label).join(", ")}.`}
+              selectorLabel={`Select a month and year to view the combined chart for ${SPECIAL_NAMES}.`}
               selectedMonth={selMonth}
               selectedYear={selYear}
               onGo={(m, y) => navigateMonth(m, y)}
@@ -295,6 +294,7 @@ export default function HomePage() {
           </div>
         </div>
       </main>
+
       <Footer />
       <FloatingButtons />
     </div>

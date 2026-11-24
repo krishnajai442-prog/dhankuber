@@ -347,3 +347,10 @@ html:has(.admin-layout)::-webkit-scrollbar-corner {
     border-radius: 16px;
   }
 }
+
+/* When the desktop rail is collapsed, pull the content in to match (w-16). */
+@media (min-width: 1024px) {
+  .admin-layout:has(.admin-sidebar[data-collapsed="true"]) .admin-main {
+    margin-left: 4rem;
+  }
+}

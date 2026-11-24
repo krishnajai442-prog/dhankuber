@@ -7,6 +7,7 @@ import { Select } from "@/components/shared/Select";
 import { DrawTimePicker } from "@/components/admin/DrawTimePicker";
 import { Tag, Hash, CalendarClock, Eye, Star, CalendarDays } from "lucide-react";
 import { fmtTimeLabel, getDrawTime, slugify } from "@/lib/markets";
+import { SPECIAL_MARKETS, marketKey } from "@/lib/markets";
 
 interface ChartFormData {
   chartName: string;
@@ -124,13 +125,17 @@ export function ChartForm({
         // Blank is valid: saves a "pending" table; the number can be added later.
         if ((value as string).length > 20) return "Result too long";
         break;
-      case "date":
+            case "date": {
         if (typeof value === "number" && formData.month && formData.year) {
           const selectedDate = new Date(formData.year, formData.month - 1, value);
           if (selectedDate > today) return "Future dates not allowed";
+          const isSpecial = SPECIAL_MARKETS.some((n) => marketKey(n) === marketKey(formData.chartName || ""));
+          if (selectedDate < today && !isSpecial)
+            return "Past dates can only be added for Gali, Desawar, Faridabad, Ghaziabad";
         }
         if (typeof value === "number" && (value < 1 || value > 31)) return "Invalid date";
         break;
+      }
       case "month":
         if (typeof value === "number" && (value < 1 || value > 12)) return "Invalid month";
         break;

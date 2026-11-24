@@ -5,7 +5,7 @@ import connectDB from "@/lib/mongodb";
 import Chart from "@/models/Chart";
 import { verifyToken } from "@/lib/auth";
 import {
-  DEFAULT_MARKETS, addDays, autoResult, escapeRegExp, getDefaultDrawTime, istNow, istToday, slugify,
+  DEFAULT_MARKETS, SPECIAL_MARKETS, addDays, autoResult, escapeRegExp, getDefaultDrawTime, istNow, istToday, slugify,
 } from "@/lib/markets";
 
 /**
@@ -31,7 +31,7 @@ export async function POST() {
     let created = 0;
 
     for (const day of [yesterday, today]) {
-      for (const name of DEFAULT_MARKETS) {
+          for (const name of [...DEFAULT_MARKETS, ...SPECIAL_MARKETS]) {
         const slug = slugify(name);
                const existing = await Chart.findOne({
           chartName: { $regex: `^${escapeRegExp(name)}$`, $options: "i" },

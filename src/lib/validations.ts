@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SPECIAL_SLUGS, slugify } from "./markets";
 
 export const loginSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
@@ -36,11 +37,11 @@ export const chartSchema = chartBaseSchema.refine((data) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const selectedDate = new Date(data.year, data.month - 1, data.date);
-  return selectedDate <= today;
-}, {
-  message: "Future dates are not allowed",
-  path: ["date"],
-});
+  if (selectedDate > today) return false;
+  // Past backfill is reserved for the 4 special tables.
+  if (selectedDate < today && !SPECIAL_SLUGS.includes(slugify(data.chartName))) return false;
+  return true;
+}, { message: "Future dates not allowed; past dates only for Gali, Desawar, Faridabad, Ghaziabad", path: ["date"] });
 
 // Partial schema without future date check (for updates)
 export const chartUpdateSchema = chartBaseSchema.partial();

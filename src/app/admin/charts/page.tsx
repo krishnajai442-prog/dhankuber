@@ -12,7 +12,7 @@ import { Select } from "@/components/shared/Select";
 import { Loading } from "@/components/shared/Loading";
 import { Plus, Search, X, RefreshCw } from "lucide-react";
 import { clsx } from "clsx";
-import { getDrawTime, istNow, marketKey, minutesOf, slugify } from "@/lib/markets";
+import { SPECIAL_MARKETS, dateKey, getDrawTime, istNow, marketKey, minutesOf, slugify } from "@/lib/markets";
 
 /* ---------------------------------- types --------------------------------- */
 
@@ -40,11 +40,11 @@ interface Pagination {
   totalPages: number;
 }
 
-type ViewMode = "today" | "tables" | "alldates";
+type ViewMode = "today" | "special" | "tables" | "alldates";
 
 /* --------------------------------- helpers -------------------------------- */
 
-/** Fresh IST "today" strings (same clock as the urgency sort; correct across midnight). */
+/** Fresh IST "today" strings (same clock as the action-order sort; correct across midnight). */
 function todayParts() {
   const n = istNow();
   return {
@@ -57,10 +57,24 @@ function todayParts() {
 const byName = (a: ChartData, b: ChartData) =>
   a.chartName.localeCompare(b.chartName, undefined, { sensitivity: "base" });
 
+const byNewest = (a: ChartData, b: ChartData) =>
+  dateKey(b.year, b.month, b.date) - dateKey(a.year, a.month, a.date);
+
 async function readCharts(res: Response): Promise<ChartData[]> {
   if (!res.ok) return [];
   const d = await res.json();
   return d?.success ? (d.data.charts as ChartData[]) : [];
+}
+
+/** Client-side paginate a fully-built row list (used by today + special views). */
+function paginate(rows: ChartData[], page: number, limit: number) {
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const safePage = Math.min(page, totalPages);
+  return {
+    slice: rows.slice((safePage - 1) * limit, safePage * limit),
+    pagination: { page: safePage, limit, total, totalPages },
+  };
 }
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
@@ -87,7 +101,10 @@ export default function AdminChartsPage() {
 
   // view + filters (seeded from URL)
   const initialView: ViewMode =
-    searchParams.get("view") === "tables" ? "tables" : searchParams.get("view") === "alldates" ? "alldates" : "today";
+    searchParams.get("view") === "tables" ? "tables"
+      : searchParams.get("view") === "alldates" ? "alldates"
+      : searchParams.get("view") === "special" ? "special"
+      : "today";
   const [view, setView] = useState<ViewMode>(initialView);
   const [search, setSearch] = useState(searchParams.get("search") || "");
   const [dateFilter, setDateFilter] = useState(searchParams.get("date") || (initialView === "today" ? todayParts().date : ""));
@@ -155,11 +172,9 @@ export default function AdminChartsPage() {
             .map((r) => ({ ...r, stale: true }));
         }
 
-        // ACTION ORDER: nearest UPCOMING draw first (22:25 → 22:50 → 23:15 …),
-        // wrapping past midnight so already-drawn tables come after the last draw.
-               // ACTION ORDER (3 tiers):
-        //  1) needs action & draw time passed (pending result / no entry today) → most overdue first
-        //  2) upcoming draws → next one first (22:25 → 22:50 → 23:15 …)
+        // ACTION ORDER (3 tiers):
+        //  1) needs action & draw time passed (pending / no entry today) → most overdue first
+        //  2) upcoming draws → next one first
         //  3) already published → last
         const now = istNow();
         const nowMinutes = now.getHours() * 60 + now.getMinutes();
@@ -168,20 +183,38 @@ export default function AdminChartsPage() {
         const actionKey = (r: ChartData) => {
           const m = drawMins(r);
           const passed = nowMinutes >= m;
-          if (passed && needsAction(r)) return -(nowMinutes - m); // overdue: earliest first
-          if (!passed) return m - nowMinutes;                    // upcoming: next first
-          return 1_000_000 + (nowMinutes - m);                   // published: last
+          if (passed && needsAction(r)) return -(nowMinutes - m);
+          if (!passed) return m - nowMinutes;
+          return 1_000_000 + (nowMinutes - m);
         };
         const combined = [...updatedRows, ...staleRows].sort(
           (a, b) => actionKey(a) - actionKey(b) || byName(a, b)
         );
 
-        const limit = pagination.limit;
-        const total = combined.length;
-        const totalPages = Math.max(1, Math.ceil(total / limit));
-        const safePage = Math.min(page, totalPages);
-        setCharts(combined.slice((safePage - 1) * limit, safePage * limit));
-        setPagination({ page: safePage, limit, total, totalPages });
+        const p = paginate(combined, page, pagination.limit);
+        setCharts(p.slice);
+        setPagination(p.pagination);
+      } else if (view === "special") {
+        // Self-contained Special 4: fetch each special market by name, keep EXACT matches.
+        // Works with the existing API (no `special=1` backend filter needed).
+        const lists = await Promise.all(
+          SPECIAL_MARKETS.map((name) => {
+            const p = new URLSearchParams({ page: "1", limit: "100", sortBy: "chartName", sortOrder: "asc", search: name });
+            if (dateFilter) p.set("date", dateFilter);
+            if (monthFilter) p.set("month", monthFilter);
+            if (yearFilter) p.set("year", yearFilter);
+            if (statusFilter !== "all") p.set("isActive", statusFilter);
+            return fetch(`/api/admin/charts?${p}`).then(readCharts);
+          })
+        );
+        const wanted = new Set(SPECIAL_MARKETS.map((n) => marketKey(n)));
+        let rows = lists.flat().filter((r) => wanted.has(marketKey(r.chartName)));
+        if (search) rows = rows.filter((r) => r.chartName.toLowerCase().includes(search.toLowerCase()));
+        rows.sort((a, b) => byName(a, b) || byNewest(a, b));
+
+        const p = paginate(rows, page, pagination.limit);
+        setCharts(p.slice);
+        setPagination(p.pagination);
       } else {
         const params = new URLSearchParams({
           page: page.toString(),
@@ -217,7 +250,7 @@ export default function AdminChartsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pagination.page, search, dateFilter, monthFilter, yearFilter, statusFilter, view]);
 
-    // Re-sort every minute so the top always tracks the clock (today view only).
+  // Re-sort every minute so the top always tracks the clock (today view only).
   useEffect(() => {
     if (view !== "today") return;
     const t = setInterval(() => fetchCharts(pagination.page), 60000);
@@ -328,13 +361,16 @@ export default function AdminChartsPage() {
               <h2 className="text-xl font-semibold text-gray-900">All Charts</h2>
               <p className="text-sm text-gray-500">
                 {view === "today" && statusFilter === "all" && (
-                <>Showing <span className="font-semibold text-gray-700">today's</span> tables in <span className="font-semibold text-gray-700">action order</span> — overdue / pending results first, then the next upcoming draws, published tables last. Click a row to edit / update it.</>
+                  <>Showing <span className="font-semibold text-gray-700">today's</span> tables in <span className="font-semibold text-gray-700">action order</span> — overdue / pending results first, then the next upcoming draws, published tables last. Click a row to edit / update it.</>
                 )}
                 {view === "today" && statusFilter === "true" && (
                   <>Showing <span className="font-semibold text-gray-700">Active Results</span> in action order (next draw first) — only charts updated for the current date.</>
                 )}
                 {view === "today" && statusFilter === "false" && (
                   <>Showing <span className="font-semibold text-gray-700">inactive</span> charts in action order for the current date.</>
+                )}
+                {view === "special" && (
+                  <>Showing the <span className="font-semibold text-gray-700">4 special tables</span> (Gali, Desawar, Faridabad, Ghaziabad) — full history, newest first per table. Use <span className="font-semibold text-gray-700">Add Chart</span> to backfill past dates for these.</>
                 )}
                 {view === "tables" && (
                   <>Showing <span className="font-semibold text-gray-700">all tables</span> A → Z (latest entry of each market) — same count as Total Charts.</>
@@ -388,6 +424,9 @@ export default function AdminChartsPage() {
                 </Button>
                 <Button type="button" variant={view === "today" ? "secondary" : "outline"} onClick={() => switchView("today")}>
                   Today
+                </Button>
+                <Button type="button" variant={view === "special" ? "secondary" : "outline"} onClick={() => switchView("special")}>
+                  Special 4
                 </Button>
                 <Button type="button" variant={view === "tables" ? "secondary" : "outline"} onClick={() => switchView("tables")}>
                   All Tables
