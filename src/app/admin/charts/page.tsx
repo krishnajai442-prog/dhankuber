@@ -10,7 +10,7 @@ import { Button } from "@/components/shared/Button";
 import { Input } from "@/components/shared/Input";
 import { Select } from "@/components/shared/Select";
 import { Loading } from "@/components/shared/Loading";
-import { Plus, Search, X, RefreshCw } from "lucide-react";
+import { Plus, Search, X, RefreshCw, Upload } from "lucide-react";
 import { clsx } from "clsx";
 import { SPECIAL_MARKETS, dateKey, getDrawTime, istNow, marketKey, minutesOf, slugify } from "@/lib/markets";
 
@@ -385,6 +385,10 @@ export default function AdminChartsPage() {
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Sync Default Markets
               </Button>
+                 <Link href="/admin/charts/bulk-import" className="btn btn-outline">
+                <Upload className="mr-2 h-4 w-4" />
+                Bulk Import
+              </Link>
               <Link href="/admin/charts/add" className="btn btn-primary">
                 <Plus className="mr-2 h-4 w-4" />
                 Add Chart

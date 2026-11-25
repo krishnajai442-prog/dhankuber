@@ -10,41 +10,32 @@ export const viewport: Viewport = {
   themeColor: "#ffffff",
 };
 
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://dhankuber-ruddy.vercel.app";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: "Dhan Kuber - Live Results & Charts",
+    default: "Dhan Kuber — Live Satta Result & Monthly Charts",
     template: "%s | Dhan Kuber",
   },
-  description: "Get the latest Dhan Kuber results, charts, and live updates for Gali, Desawar, Faridabad, Ghaziabad and more markets.",
-  keywords: ["Dhan Kuber", "Satta Result", "Gali", "Desawar", "Faridabad", "Ghaziabad", "Satta Chart", "Live Result"],
-  authors: [{ name: "Dhan Kuber" }],
-  creator: "Dhan Kuber",
-  publisher: "Dhan Kuber",
-  robots: "index, follow",
+  description:
+    "Dhan Kuber live results and monthly record charts for Gali, Desawar, Faridabad, Ghaziabad and all regional markets. Updated daily with full历史 archive.",
+  alternates: { canonical: "/" },
+  robots: { index: true, follow: true },
   openGraph: {
     type: "website",
     locale: "en_IN",
-    url: "https://sattaking.example.com",
+    url: SITE_URL,
     siteName: "Dhan Kuber",
-    title: "Dhan Kuber - Live Results & Charts",
-    description: "Get the latest Dhan Kuber results, charts, and live updates for all major markets.",
-    images: [
-      {
-        url: "/og-image.jpg",
-        width: 1200,
-        height: 630,
-        alt: "Dhan Kuber Results",
-      },
-    ],
+    title: "Dhan Kuber — Live Satta Result & Monthly Charts",
+    description: "Daily results and monthly charts for Gali, Desawar, Faridabad, Ghaziabad and more.",
+    images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "Dhan Kuber Results" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Dhan Kuber - Live Results & Charts",
-    description: "Get the latest Dhan Kuber results and charts.",
+    title: "Dhan Kuber — Live Satta Result & Monthly Charts",
+    description: "Daily results and monthly charts.",
     images: ["/og-image.jpg"],
-  },
-  verification: {
-    google: "google-site-verification-code",
   },
 };
 
