@@ -55,10 +55,10 @@ const chartSchema = new Schema<IChart>(
       min: 1,
       max: 12,
     },
-    year: {
+      year: {
       type: Number,
       required: true,
-      min: 2012,
+      min: 2015,
       max: 2030,
     },
     displayOrder: {

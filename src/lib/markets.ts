@@ -243,14 +243,16 @@ export function taglineYears(): number[] {
   for (let y = 2015; y < cy; y++) out.push(y);
   return out;
 }
-/** Year options for selectors (2012 .. current, newest first). */
+/** Earliest year the site covers — used by every selector, URL guard and validator. */
+export const MIN_YEAR = 2015;
+
+/** Year options for selectors (2015 .. current, newest first). */
 export function yearOptions(): number[] {
   const cy = istNow().getFullYear();
   const out: number[] = [];
-  for (let y = 2012; y <= cy; y++) out.push(y);
+  for (let y = MIN_YEAR; y <= cy; y++) out.push(y);
   return out.reverse();
 }
-
 /* ------------------------------ monthly chart ---------------------------- */
 
 export interface MonthChartLite {

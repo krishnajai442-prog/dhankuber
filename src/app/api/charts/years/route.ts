@@ -8,7 +8,7 @@ export async function GET() {
   try {
     await connectDB();
 
-    const years = await Chart.distinct("year").sort();
+    const years = (await Chart.distinct("year")).filter((y: number) => y >= 2015);
     const currentYear = new Date().getFullYear();
     // Generate years from 2012 to current year only
     const allYears = Array.from({ length: currentYear - 2012 + 1 }, (_, i) => 2012 + i);

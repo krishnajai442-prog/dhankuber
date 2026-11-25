@@ -11,6 +11,7 @@ import {
   addDays, autoResult, buildMonthlyRows, dateKey, drawSection, firstEntryDates, fmtTimeLabel,
   fetchChartsResilient, getCachedCharts, getDrawTime, istNow, istToday, longDate, minutesOf,
   ordinal, slugify, taglineYears, weekdayOf, DrawSection,
+  MIN_YEAR,
 } from "@/lib/markets";
 
 /* ---------------------------------- types --------------------------------- */
@@ -60,7 +61,7 @@ function readSelFromUrl(): { month: number; year: number } | null {
   const p = new URLSearchParams(window.location.search);
   const m = parseInt(p.get("month") || "", 10);
   const y = parseInt(p.get("year") || "", 10);
-  if (m >= 1 && m <= 12 && y >= 2012 && y <= 2100) return { month: m, year: y };
+  if (m >= 1 && m <= 12 && y >= MIN_YEAR && y <= 2100) return { month: m, year: y };
   return null;
 }
 
