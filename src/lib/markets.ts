@@ -224,7 +224,7 @@ export function dateKey(y: number, m: number, d: number): number {
 /* ------------------------------ auto results ----------------------------- */
 
 /** Deterministic pseudo-random value — backfill only, never today's reveal.
- *  Haruf King gets 3 digits (000–999); every other market gets 2 (00–99). */
+ *  Haruf King gets a "triple" (000, 111...999); every other market gets 2 (00–99). */
 export function autoResult(seedKey: string, day: number, month: number, year: number): string {
   const seed = `${seedKey}-${day}-${month}-${year}`;
   let hash = 0;
@@ -233,8 +233,15 @@ export function autoResult(seedKey: string, day: number, month: number, year: nu
     hash |= 0;
   }
   const digits = resultDigits(seedKey);
-  const mod = digits === 3 ? 1000 : 100;
-  return (Math.abs(hash) % mod).toString().padStart(digits, "0");
+  
+  // ✅ Haruf King: pick one digit (0-9) and repeat it 3 times
+  if (digits === 3) {
+    const singleDigit = Math.abs(hash) % 10;
+    return `${singleDigit}${singleDigit}${singleDigit}`;
+  }
+  
+  // Everything else gets a standard 2-digit number (00-99)
+  return (Math.abs(hash) % 100).toString().padStart(2, "0");
 }
 
 /** Earliest entry date per market slug = its "generation" date (as a dateKey). */
@@ -364,13 +371,20 @@ export function buildMonthlyRows(
         continue;
       }
 
-      // 3) PAST day → an admin/imported result always wins.
+            // 3) PAST day → an admin/imported result always wins.
       if (db && db.result.trim() !== "") {
         values[col.key] = db.result;
         continue;
       }
 
-      // 4) PAST day with no result → backfill (Special tables always, others pre-generation).
+      // 3b) PAST day + entry exists but result is BLANK (admin cleared an old
+      //     result, or pre-created and never filled) → show "--", NEVER backfill.
+      if (db) {
+        values[col.key] = MISSING_MARK;
+        continue;
+      }
+
+      // 4) PAST day with NO entry at all → backfill (Special tables always, others pre-generation).
       const isHidden = hiddenSet.has(col.key);
       const isSpecial = SPECIAL_SLUGS.includes(col.key) && !isHidden;
       const gen = firstEntry.get(col.key);
