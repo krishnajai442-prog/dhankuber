@@ -44,9 +44,9 @@ export const metadata: Metadata = {
     description: BRAND_DESCRIPTION,
     images: ["/og-image.jpg"],
   },
-  icons: {
-    icon: [{ url: "/favicon.ico", sizes: "any" }, { url: "/icon.svg", type: "image/svg+xml" }],
-    apple: "/apple-touch-icon.png",
+    icons: {
+    icon: "/icon.jpg",
+    apple: "/apple-icon.jpg",
   },
   manifest: "/manifest.json",
   // Add the real token from Google Search Console (HTML-tag method) in Vercel env.
@@ -62,7 +62,7 @@ const jsonLd = {
       name: BRAND_NAME,
       alternateName: [BRAND_DOMAIN, "Online Khaiwal", "OnlineKhiwal"],
       url: SITE_URL,
-      logo: `${SITE_URL}/icon.svg`,
+      logo: `${SITE_URL}/bull.jpg`,
       email: BRAND_EMAIL,
       contactPoint: [
         {
