@@ -4,9 +4,16 @@
 /* ------------------------------- constants ------------------------------- */
 
 /** The 4 permanent "special" tables (monthly chart columns; admin may backfill past dates). */
-export const SPECIAL_MARKETS = ["Gali", "Desawar", "Faridabad", "Ghaziabad"];
+export const SPECIAL_MARKETS = ["Gali", "Desawar", "Faridabad", "Haruf King", "Ghaziabad"];
 /** Slug mirrors of SPECIAL_MARKETS — keep both lists in sync. */
-export const SPECIAL_SLUGS = ["gali", "desawar", "faridabad", "ghaziabad"];
+export const SPECIAL_SLUGS = ["gali", "desawar", "faridabad", "haruf-king", "ghaziabad"];
+
+/** Markets that declare a 3-digit number instead of the usual 2. */
+export const THREE_DIGIT_SLUGS = ["haruf-king"];
+/** Digit count for a market's number: Haruf King → 3, everything else → 2. */
+export function resultDigits(slug: string): number {
+  return THREE_DIGIT_SLUGS.includes(slug) ? 3 : 2;
+}
 
 export const teamNames: string[] = [
   "Gali Gharana", "Desawar Dabangs", "Faridabad Fauj", "Ghaziabad Gurkhas", "Delhi Dilwale", "Mumbai Maharajas", "Kolkata Kohinoors", "Chennai Chakravartis",
@@ -24,8 +31,14 @@ export const teamNames: string[] = [
   "Belgaum Brahmos", "Ambattur Avatars", "Tirunelveli Thalapathis", "Malegaon Mavlas", "Gaya Gautams", "Jalgaon Jujhars", "Udaipur Udayans", "Maheshtala Mahadevs",
 ];
 
-/** Default markets = team names (home daily table shows a row for each team). */
-export const DEFAULT_MARKETS = teamNames;
+/** The ONLY tables the site keeps: 5 teams + the Special 4 (always present). */
+export const DEFAULT_MARKETS: string[] = [
+  "Tirunelveli Thalapathis",
+  "Tiruppur Thalaivas",
+  "Trichy Thakurs",
+  "Udaipur Udayans",
+  "Ujjain Ujjwals",
+];
 
 /** Legacy: highlighting is 100% admin-controlled, so nothing is highlighted by default. */
 export const MAJOR_SLUGS: string[] = [];
@@ -96,11 +109,12 @@ const REFERENCE_DRAW_TIMES: Record<string, string> = {
   anarkali: "15:30", "maa-bhagwati": "15:30", "dubai-delhi": "15:45",
   "udaan-king": "16:00", "shiv-shakti": "16:05", "shri-ganesh": "16:30", "ghaziabad-din": "16:35", "shri-nagar": "16:35",
   "ds-number-1": "17:00", "mahalaxmi-bazar": "17:05", ahmedabad: "17:10", maharaj: "17:15", "uttarakhand-uk": "17:30",
-  faridabad: "18:00", "old-faridabad": "18:00", sadabahar: "18:00", "desawar-saam": "18:00", "old-ghaziabad": "18:00",
+    faridabad: "18:00", "old-faridabad": "18:00", sadabahar: "18:00", "desawar-saam": "18:00", "old-ghaziabad": "18:00",
+  "haruf-king": "19:00",
   "punjab-king": "19:15", neelkanth: "19:20",
   "shri-laxmi": "19:30", "old-city": "19:30", "mini-desawer": "19:30", "chotti-ghaziabad": "19:30",
   gurgaon: "19:35", "veera-king": "19:40", paras: "19:40", "farida-bazar": "19:40",
-  "delhi-golden": "19:45", "mathura-city": "19:45", "dhan-kuber": "19:55", "bhavishyavani": "19:55",
+  "delhi-golden": "19:45", "mathura-city": "19:45", "onlinekhiwal": "19:55", "bhavishyavani": "19:55",
   "shri-ji": "20:00", "shiv-shankar": "20:00", bharat: "20:00", nagpur: "20:00", "gali-bazar": "20:00",
   bangalore: "20:00", "punjab-laxmi": "20:00", "magadh-gold": "20:00",
   "vip-agra": "20:05", "mg-prime": "20:05",
@@ -147,7 +161,7 @@ const TEAM_SCHEDULE: string[] = [
   "20:15", "20:15", "20:20", "20:30", "20:35",
 ];
 
-[...teamNames]
+[...DEFAULT_MARKETS]
   .sort((a, b) => a.localeCompare(b))
   .forEach((name, i) => {
     DEFAULT_DRAW_TIMES[slugify(name)] = TEAM_SCHEDULE[i] ?? "12:00";
@@ -209,7 +223,8 @@ export function dateKey(y: number, m: number, d: number): number {
 
 /* ------------------------------ auto results ----------------------------- */
 
-/** Deterministic pseudo-random 2-digit value — backfill only, never today's reveal. */
+/** Deterministic pseudo-random value — backfill only, never today's reveal.
+ *  Haruf King gets 3 digits (000–999); every other market gets 2 (00–99). */
 export function autoResult(seedKey: string, day: number, month: number, year: number): string {
   const seed = `${seedKey}-${day}-${month}-${year}`;
   let hash = 0;
@@ -217,7 +232,9 @@ export function autoResult(seedKey: string, day: number, month: number, year: nu
     hash = ((hash << 5) - hash) + seed.charCodeAt(i);
     hash |= 0;
   }
-  return (Math.abs(hash) % 100).toString().padStart(2, "0");
+  const digits = resultDigits(seedKey);
+  const mod = digits === 3 ? 1000 : 100;
+  return (Math.abs(hash) % mod).toString().padStart(digits, "0");
 }
 
 /** Earliest entry date per market slug = its "generation" date (as a dateKey). */
@@ -243,6 +260,7 @@ export function taglineYears(): number[] {
   for (let y = 2015; y < cy; y++) out.push(y);
   return out;
 }
+
 /** Earliest year the site covers — used by every selector, URL guard and validator. */
 export const MIN_YEAR = 2015;
 
@@ -253,6 +271,7 @@ export function yearOptions(): number[] {
   for (let y = MIN_YEAR; y <= cy; y++) out.push(y);
   return out.reverse();
 }
+
 /* ------------------------------ monthly chart ---------------------------- */
 
 export interface MonthChartLite {
@@ -289,8 +308,10 @@ export function buildMonthlyRows(
   charts: MonthChartLite[],
   today: DayParts,
   nowMinutes: number,
-  firstEntry: Map<string, number>
+  firstEntry: Map<string, number>,
+  hidden: string[] = []
 ): MonthlyRowData[] {
+  const hiddenSet = new Set(hidden);
   const byKey = new Map<string, MonthChartLite>();
   const timeBySlug = new Map<string, string>();
   const timeRank = new Map<string, number>();
@@ -320,29 +341,44 @@ export function buildMonthlyRows(
     const cellTime = new Date(sel.year, sel.month - 1, day).getTime();
     const cellKey = dateKey(sel.year, sel.month, day);
 
-    for (const col of columns) {
+     for (const col of columns) {
       const db = byKey.get(`${col.key}|${day}`);
-      if (db && db.result && db.result.trim() !== "") {
+
+      // 1) FUTURE day → never a number, whatever is stored.
+      if (cellTime > todayTime) {
+        values[col.key] = UPCOMING_MARK;
+        continue;
+      }
+
+      // 2) TODAY → the draw-time gate outranks ANY stored value, including a
+      //    pre-seeded placeholder. Before the draw: "XX". After: real value or "--".
+      if (cellTime === todayTime) {
+        const mins = minutesOf(getDrawTime(col.key, timeBySlug.get(col.key)));
+        if (nowMinutes < mins) {
+          values[col.key] = UPCOMING_MARK;
+        } else if (db && db.result.trim() !== "") {
+          values[col.key] = db.result;
+        } else {
+          values[col.key] = MISSING_MARK;
+        }
+        continue;
+      }
+
+      // 3) PAST day → an admin/imported result always wins.
+      if (db && db.result.trim() !== "") {
         values[col.key] = db.result;
         continue;
       }
 
-      // Blank / pending / no entry → backfill or placeholder rules.
-      const isSpecial = SPECIAL_SLUGS.includes(col.key);
+      // 4) PAST day with no result → backfill (Special tables always, others pre-generation).
+      const isHidden = hiddenSet.has(col.key);
+      const isSpecial = SPECIAL_SLUGS.includes(col.key) && !isHidden;
       const gen = firstEntry.get(col.key);
-      const beforeGeneration = gen === undefined ? cellTime < todayTime : cellKey < gen;
-
-      if (cellTime < todayTime) {
-        values[col.key] =
-          isSpecial || beforeGeneration
-            ? autoResult(col.key, day, sel.month, sel.year)
-            : MISSING_MARK;
-      } else if (cellTime === todayTime) {
-        const mins = minutesOf(getDrawTime(col.key, timeBySlug.get(col.key)));
-        values[col.key] = nowMinutes >= mins ? MISSING_MARK : UPCOMING_MARK;
-      } else {
-        values[col.key] = UPCOMING_MARK;
-      }
+      const beforeGeneration = isHidden ? false : gen === undefined ? true : cellKey < gen;
+      values[col.key] =
+        isSpecial || beforeGeneration
+          ? autoResult(col.key, day, sel.month, sel.year)
+          : MISSING_MARK;
     }
 
     rows.push({ date: day, values, red: charts.some((c) => c.date === day && c.isHighlighted) });
@@ -366,6 +402,7 @@ export interface CacheableChart {
 }
 
 const CACHE_KEY = "skf-charts-cache-v1";
+const HIDDEN_CACHE_KEY = "skf-charts-hidden-v1";
 
 function readCache(): Record<string, CacheableChart[]> {
   try {
@@ -381,6 +418,34 @@ export function getCachedCharts(key: string): CacheableChart[] {
     return readCache()[key] || [];
   } catch {
     return [];
+  }
+}
+
+function readHiddenCache(): Record<string, string[]> {
+  try {
+    if (typeof window === "undefined") return {};
+    return JSON.parse(localStorage.getItem(HIDDEN_CACHE_KEY) || "{}") as Record<string, string[]>;
+  } catch {
+    return {};
+  }
+}
+
+export function getCachedHidden(key: string): string[] {
+  try {
+    return readHiddenCache()[key] || [];
+  } catch {
+    return [];
+  }
+}
+
+function setCachedHidden(key: string, slugs: string[]): void {
+  try {
+    if (typeof window === "undefined" || !Array.isArray(slugs)) return;
+    const cache = readHiddenCache();
+    cache[key] = slugs;
+    localStorage.setItem(HIDDEN_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    /* ignore */
   }
 }
 
@@ -409,6 +474,7 @@ export async function fetchChartsResilient(
         const d = await res.json();
         if (d && d.success === true && Array.isArray(d.data)) {
           setCachedCharts(cacheKey, d.data);
+          setCachedHidden(cacheKey, Array.isArray(d.hidden) ? (d.hidden as string[]) : []);
           return d.data as CacheableChart[];
         }
       }

@@ -41,7 +41,7 @@ export function Navigation({ announcements }: NavigationProps) {
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-2" aria-label="Dhan Kuber Home">
             <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center">
-              <span className="text-white font-bold text-lg">SK</span>
+              <span className="text-white font-bold text-lg">OK</span>
             </div>
             <span className="font-bold text-xl text-gray-900 hidden sm:block">Dhan Kuber</span>
           </Link>

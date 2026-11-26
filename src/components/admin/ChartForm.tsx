@@ -6,8 +6,12 @@ import { Button } from "@/components/shared/Button";
 import { Select } from "@/components/shared/Select";
 import { DrawTimePicker } from "@/components/admin/DrawTimePicker";
 import { Tag, Hash, CalendarClock, Eye, Star, CalendarDays } from "lucide-react";
-import { fmtTimeLabel, getDrawTime, slugify } from "@/lib/markets";
-import { SPECIAL_MARKETS, marketKey } from "@/lib/markets";
+import {
+  DEFAULT_MARKETS, SPECIAL_MARKETS, MIN_YEAR,
+  fmtTimeLabel, getDrawTime, marketKey, resultDigits, slugify,
+} from "@/lib/markets";
+
+/* ---------------------------------- types --------------------------------- */
 
 interface ChartFormData {
   chartName: string;
@@ -19,7 +23,7 @@ interface ChartFormData {
   isHighlighted: boolean;
   isActive: boolean;
   scheduledAt?: string; // ISO datetime string
-  drawTime?: string; // 24h "HH:MM"
+  drawTime?: string;    // 24h "HH:MM"
 }
 
 interface ChartFormProps {
@@ -31,6 +35,8 @@ interface ChartFormProps {
   availableMonths?: number[];
   availableDates?: number[];
 }
+
+/* -------------------------------- constants ------------------------------- */
 
 const DEFAULT_DATA: ChartFormData = {
   chartName: "",
@@ -44,6 +50,28 @@ const DEFAULT_DATA: ChartFormData = {
   scheduledAt: "",
   drawTime: "",
 };
+
+const MONTHS = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+];
+
+/** Autocomplete = the tables the site actually keeps (teams + special tables). */
+const COMMON_CHARTS = [...DEFAULT_MARKETS, ...SPECIAL_MARKETS];
+
+const pad = (n: number) => n.toString().padStart(2, "0");
+
+/* --------------------------------- helpers -------------------------------- */
 
 function buildInitial(initial?: Partial<ChartFormData>): ChartFormData {
   if (!initial) return { ...DEFAULT_DATA };
@@ -61,38 +89,7 @@ function buildInitial(initial?: Partial<ChartFormData>): ChartFormData {
   };
 }
 
-const MONTHS = [
-  { value: 1, label: "January" },
-  { value: 2, label: "February" },
-  { value: 3, label: "March" },
-  { value: 4, label: "April" },
-  { value: 5, label: "May" },
-  { value: 6, label: "June" },
-  { value: 7, label: "July" },
-  { value: 8, label: "August" },
-  { value: 9, label: "September" },
-  { value: 10, label: "October" },
-  { value: 11, label: "November" },
-  { value: 12, label: "December" },
-];
-
-const COMMON_CHARTS = [
-   "Faridabad", "Ghaziabad", "Delhi", "Mumbai", "Kolkata", "Chennai",
-  "Bangalore", "Hyderabad", "Pune", "Ahmedabad", "Jaipur", "Lucknow", "Kanpur", "Nagpur",
-  "Indore", "Bhopal", "Visakhapatnam", "Patna", "Vadodara", "Ludhiana", "Agra", "Nashik",
-  "Meerut", "Rajkot", "Kalyan", "Vasai", "Varanasi", "Srinagar", "Aurangabad", "Dhanbad",
-  "Amritsar", "Navi Mumbai", "Allahabad", "Howrah", "Gwalior", "Jabalpur", "Coimbatore",
-  "Vijayawada", "Jodhpur", "Madurai", "Raipur", "Kota", "Guwahati", "Chandigarh", "Solapur",
-  "Hubli", "Mysore", "Tiruchirappalli", "Bareilly", "Aligarh", "Tiruppur", "Moradabad",
-  "Jalandhar", "Bhubaneswar", "Salem", "Warangal", "Guntur", "Bhiwandi", "Saharanpur",
-  "Gorakhpur", "Bikaner", "Amravati", "Noida", "Jamshedpur", "Bhilai", "Cuttack",
-  "Firozabad", "Kochi", "Nellore", "Bhavnagar", "Dehradun", "Durgapur", "Asansol",
-  "Rourkela", "Nanded", "Kolhapur", "Ajmer", "Akola", "Gulbarga", "Jamnagar", "Ujjain",
-  "Loni", "Siliguri", "Jhansi", "Ulhasnagar", "Jammu", "Sangli", "Mangalore", "Erode",
-  "Belgaum", "Ambattur", "Tirunelveli", "Malegaon", "Gaya", "Jalgaon", "Udaipur", "Maheshtala",
-];
-
-const pad = (n: number) => n.toString().padStart(2, "0");
+/* -------------------------------- component ------------------------------- */
 
 export function ChartForm({
   initialData,
@@ -115,34 +112,51 @@ export function ChartForm({
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const validateField = (name: keyof ChartFormData, value: string | number | boolean): string | undefined => {
+  // Haruf King → 3 digits, every other market → 2.
+  const digits = resultDigits(slugify(formData.chartName || ""));
+  const isSpecial = SPECIAL_MARKETS.some((n) => marketKey(n) === marketKey(formData.chartName || ""));
+
+  /* -------------------------------- validation ------------------------------ */
+  const validateField = (
+    name: keyof ChartFormData,
+    value: string | number | boolean
+  ): string | undefined => {
     switch (name) {
       case "chartName":
         if (!value || (value as string).trim().length === 0) return "Chart name is required";
         if ((value as string).length > 100) return "Chart name too long";
         break;
-        case "result":
+
+      case "result":
         // Blank is valid: saves a "pending" table; the number can be added later.
         if ((value as string).length > 20) return "Result too long";
         break;
-            case "date": {
+
+      case "date": {
         if (typeof value === "number" && formData.month && formData.year) {
           const selectedDate = new Date(formData.year, formData.month - 1, value);
           if (selectedDate > today) return "Future dates not allowed";
-          const isSpecial = SPECIAL_MARKETS.some((n) => marketKey(n) === marketKey(formData.chartName || ""));
-          if (selectedDate < today && !isSpecial)
-            return "Past dates can only be added for Gali, Desawar, Faridabad, Ghaziabad";
+          const special = SPECIAL_MARKETS.some(
+            (n) => marketKey(n) === marketKey(formData.chartName || "")
+          );
+          if (selectedDate < today && !special) {
+            return `Past dates can only be added for ${SPECIAL_MARKETS.join(", ")}`;
+          }
         }
         if (typeof value === "number" && (value < 1 || value > 31)) return "Invalid date";
         break;
       }
+
       case "month":
         if (typeof value === "number" && (value < 1 || value > 12)) return "Invalid month";
         break;
+
       case "year":
-        if (typeof value === "number" && (value < 2012 || value > currentYear))
-          return `Invalid year (must be 2012-${currentYear})`;
+        if (typeof value === "number" && (value < MIN_YEAR || value > currentYear)) {
+          return `Invalid year (must be ${MIN_YEAR}-${currentYear})`;
+        }
         break;
+
       case "scheduledAt":
         if (value && typeof value === "string") {
           const scheduled = new Date(value);
@@ -150,9 +164,11 @@ export function ChartForm({
           if (scheduled < new Date()) return "Scheduled time cannot be in the past";
         }
         break;
+
       case "drawTime":
-        if (value && typeof value === "string" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(value))
+        if (value && typeof value === "string" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
           return "Invalid time (HH:MM)";
+        }
         break;
     }
     return undefined;
@@ -168,6 +184,7 @@ export function ChartForm({
     e.preventDefault();
     const newErrors: Partial<Record<keyof ChartFormData, string>> = {};
     let hasErrors = false;
+
     (Object.keys(formData) as Array<keyof ChartFormData>).forEach((key) => {
       const value = formData[key];
       if (value !== undefined) {
@@ -178,12 +195,14 @@ export function ChartForm({
         }
       }
     });
+
     setErrors(newErrors);
     if (hasErrors) return;
     await onSubmit(formData);
   };
 
-  const allYears = Array.from({ length: currentYear - 2012 + 1 }, (_, i) => 2012 + i);
+  /* --------------------------------- options -------------------------------- */
+  const allYears = Array.from({ length: currentYear - MIN_YEAR + 1 }, (_, i) => MIN_YEAR + i);
   const years = Array.from(new Set([...availableYears, ...allYears])).sort((a, b) => b - a);
   const months = availableMonths.length > 0 ? availableMonths : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   const dates = availableDates.length > 0 ? availableDates : Array.from({ length: 31 }, (_, i) => i + 1);
@@ -192,8 +211,10 @@ export function ChartForm({
     ? fmtTimeLabel(formData.drawTime)
     : fmtTimeLabel(getDrawTime(slugify(formData.chartName || ""), null));
 
-  const sectionTitle = "mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-gray-700";
+  const sectionTitle =
+    "mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-gray-700";
 
+  /* --------------------------------- render --------------------------------- */
   return (
     <form onSubmit={handleSubmit} className="space-y-6" noValidate>
       {/* LIVE PUBLIC PREVIEW — exactly the row visitors will see */}
@@ -211,7 +232,7 @@ export function ChartForm({
             <p className="truncate text-lg font-medium uppercase text-gray-900">
               {formData.chartName || "Market Name"}
             </p>
-             <p className="mt-0.5 text-xs text-gray-700">
+            <p className="mt-0.5 text-xs text-gray-700">
               at {previewTime}
               <span className="ml-2 text-sm text-blue-600">Record Chart</span>
               {!formData.result.trim() && (
@@ -237,6 +258,7 @@ export function ChartForm({
           <Tag className="h-4 w-4 text-blue-600" aria-hidden="true" />
           Market &amp; Result
         </h3>
+
         <div className="grid gap-5 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label htmlFor="chartName" className="label">
@@ -257,21 +279,30 @@ export function ChartForm({
                 "input",
                 errors.chartName && "border-danger-500 focus:border-danger-500 focus:ring-danger-500/20"
               )}
-              placeholder="e.g., Gali, Desawar, Faridabad"
+              placeholder={`e.g., ${SPECIAL_MARKETS.slice(0, 3).join(", ")}`}
               autoComplete="off"
               required
             />
             {errors.chartName && (
               <p className="mt-1.5 text-sm text-danger-600" role="alert">{errors.chartName}</p>
             )}
+            {isSpecial && (
+              <p className="mt-1.5 text-xs text-blue-600">
+                Special table — past dates can be backfilled for this market.
+              </p>
+            )}
           </div>
 
-                   <div>
+          <div>
             <label htmlFor="result" className="label">
               Result <span className="text-xs font-normal text-gray-500">(optional now)</span>
+              <span className="ml-2 badge badge-primary">{digits}-digit</span>
             </label>
             <div className="relative">
-              <Hash className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+              <Hash
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                aria-hidden="true"
+              />
               <input
                 type="text"
                 id="result"
@@ -281,7 +312,7 @@ export function ChartForm({
                   "input pl-9 font-mono text-lg",
                   errors.result && "border-danger-500 focus:border-danger-500 focus:ring-danger-500/20"
                 )}
-                placeholder="Leave blank to pre-create · e.g., 45"
+                placeholder={digits === 3 ? "Leave blank to pre-create · e.g., 007" : "Leave blank to pre-create · e.g., 45"}
                 maxLength={20}
               />
             </div>
@@ -289,11 +320,13 @@ export function ChartForm({
               <p className="mt-1.5 text-sm text-danger-600" role="alert">{errors.result}</p>
             ) : (
               <p className="mt-1.5 text-xs text-gray-500">
-                Save with a blank result to schedule the table now, then add the number 2–5 minutes before its draw time.
+                {digits === 3
+                  ? "This market declares a 3-digit number (e.g. 007). Leave blank to pre-create, then add it before the draw time."
+                  : "Save with a blank result to schedule the table now, then add the number 2–5 minutes before its draw time."}
               </p>
             )}
           </div>
-         
+
           <div>
             <label htmlFor="displayOrder" className="label">Display Order</label>
             <input
@@ -305,7 +338,9 @@ export function ChartForm({
               min={0}
               placeholder="0"
             />
-            <p className="mt-1.5 text-xs text-gray-500">Higher than 0 pins this market's position on the public table.</p>
+            <p className="mt-1.5 text-xs text-gray-500">
+              Higher than 0 pins this market&apos;s position on the public table.
+            </p>
           </div>
         </div>
       </section>

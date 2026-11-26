@@ -31,6 +31,7 @@ const PRESETS = [
   { name: "Gali", slug: "gali" },
   { name: "Desawar", slug: "desawar" },
   { name: "Faridabad", slug: "faridabad" },
+  { name: "Haruf King", slug: "haruf-king" },
   { name: "Ghaziabad", slug: "ghaziabad" },
 ];
 

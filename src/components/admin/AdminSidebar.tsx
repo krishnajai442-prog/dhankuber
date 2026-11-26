@@ -68,7 +68,7 @@ export function AdminSidebar({ isCollapsed = false, onToggle, user }: AdminSideb
         <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
           <Link href="/admin/dashboard" className="flex items-center gap-2 min-w-0" aria-label="Admin Dashboard">
             <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-bold text-lg">DK</span>
+              <span className="text-white font-bold text-lg">OK</span>
             </div>
             {!isCollapsed && <span className="font-bold text-xl text-gray-900 truncate">Admin Panel</span>}
           </Link>

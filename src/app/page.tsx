@@ -7,12 +7,12 @@ import { MonthlyChartTable } from "@/components/home/MonthlyChartTable";
 import { FloatingButtons } from "@/components/home/FloatingButtons";
 import { Footer } from "@/components/layout/Footer";
 import {
-  DEFAULT_MARKETS, MONTH_NAMES, MONTH_SHORT, MISSING_MARK, UPCOMING_MARK,
+  DEFAULT_MARKETS, MONTH_NAMES, MONTH_SHORT, MISSING_MARK, UPCOMING_MARK, MIN_YEAR,
   addDays, autoResult, buildMonthlyRows, dateKey, drawSection, firstEntryDates, fmtTimeLabel,
-  fetchChartsResilient, getCachedCharts, getDrawTime, istNow, istToday, longDate, minutesOf,
-  ordinal, slugify, taglineYears, weekdayOf, DrawSection,
-  MIN_YEAR,
+  fetchChartsResilient, getCachedCharts, getCachedHidden, getDrawTime, istNow, istToday,
+  longDate, minutesOf, ordinal, slugify, taglineYears, weekdayOf, DrawSection,
 } from "@/lib/markets";
+import { PanditPromo } from "@/components/home/PanditPromo";
 
 /* ---------------------------------- types --------------------------------- */
 
@@ -43,15 +43,16 @@ type RowState = LiveRow & {
 
 /* -------------------------------- constants ------------------------------- */
 
-/** PERMANENT special 4 — monthly chart columns, in the reference order. No dynamic selection. */
+/** PERMANENT special 4 — monthly chart columns, reference order. No dynamic selection. */
 const MONTHLY_COLUMNS = [
   { key: "desawar", label: "DSWR" },
   { key: "faridabad", label: "FRBD" },
+  { key: "haruf-king", label: "HARUF KING" },
   { key: "ghaziabad", label: "GZBD" },
   { key: "gali", label: "GALI" },
 ];
 
-const SPECIAL_NAMES = "Gali, Desawar, Ghaziabad and Faridabad";
+const SPECIAL_NAMES = "Gali, Desawar, Faridabad, Haruf King and Ghaziabad";
 
 /* --------------------------------- helpers -------------------------------- */
 
@@ -86,6 +87,8 @@ export default function HomePage() {
   const [todayCharts, setTodayCharts] = useState<ApiChart[]>([]);
   const [yesterdayCharts, setYesterdayCharts] = useState<ApiChart[]>([]);
   const [allCharts, setAllCharts] = useState<ApiChart[]>([]);
+  const [hiddenAll, setHiddenAll] = useState<string[]>([]);
+  const [hiddenMonth, setHiddenMonth] = useState<string[]>([]);
   const [booted, setBooted] = useState(false);
 
   // Inject localStorage cache BEFORE first paint so rows never flash/disappear.
@@ -96,6 +99,7 @@ export default function HomePage() {
     if (y.length) setYesterdayCharts(y as ApiChart[]);
     const a = getCachedCharts("all-markets");
     if (a.length) setAllCharts(a as ApiChart[]);
+    setHiddenAll(getCachedHidden("all-markets"));
     setBooted(true);
   }, [todayKey, yesterdayKey]);
 
@@ -120,7 +124,9 @@ export default function HomePage() {
     let alive = true;
     const loadAll = async () => {
       const d = await fetchChartsResilient(`/api/charts`, "all-markets");
-      if (alive && d) setAllCharts(d as ApiChart[]);
+      if (!alive) return;
+      if (d) setAllCharts(d as ApiChart[]);
+      setHiddenAll(getCachedHidden("all-markets"));
     };
     loadAll();
     const ref = setInterval(loadAll, 60000);
@@ -131,6 +137,8 @@ export default function HomePage() {
   const firstEntryBySlug = useMemo(() => firstEntryDates(allCharts), [allCharts]);
 
   /* ------------------------------- daily rows ------------------------------- */
+  // FULL public table: every default team + every market present in the DB.
+  // This is what makes the row count equal the admin "Total Charts" number.
   const sections = useMemo<LiveSection[]>(() => {
     const bySlug = new Map<string, RowState>();
     const ensure = (name: string): RowState => {
@@ -164,9 +172,10 @@ export default function HomePage() {
       r.dbTime = c.drawTime || null;
       absorb(r, c);
     }
+    // Every default team always has a row (placeholder until its result exists).
     for (const m of DEFAULT_MARKETS) ensure(m);
 
-    // Include every existing market (latest entry for name / draw-time / highlight).
+    // Latest active entry per market (name / draw-time / highlight).
     const meta = new Map<string, { name: string; drawTime?: string | null; highlighted: boolean; key: number }>();
     for (const c of allCharts) {
       const s = slugify(c.chartName);
@@ -183,7 +192,10 @@ export default function HomePage() {
     }
 
     const yKey = dateKey(yesterday.year, yesterday.month, yesterday.day);
-    const list = Array.from(bySlug.values());
+    // TEMP DELETE: markets whose LATEST entry is inactive are removed from the UI.
+    const hiddenSet = new Set(hiddenAll);
+    const list = Array.from(bySlug.values()).filter((r) => !hiddenSet.has(r.slug));
+
     for (const r of list) {
       if (r.hasDb) r.highlighted = r.dbHighlight;
       const time = getDrawTime(r.slug, r.dbTime);
@@ -194,7 +206,7 @@ export default function HomePage() {
 
       // TODAY: hidden until the draw time. After → admin value, else "--". NEVER auto.
       r.today = r.passed ? (r.dbToday || MISSING_MARK) : UPCOMING_MARK;
-      // YESTERDAY: admin value, else auto ONLY if before the market's generation, else "--".
+      // YESTERDAY: admin value, else auto ONLY before the market's generation, else "--".
       const gen = firstEntryBySlug.get(r.slug);
       if (r.dbYesterday) r.yesterday = r.dbYesterday;
       else if (gen !== undefined && yKey < gen) r.yesterday = autoResult(r.slug, yesterday.day, yesterday.month, yesterday.year);
@@ -211,7 +223,7 @@ export default function HomePage() {
       { label: "REST", rows: rest },
     ].filter((s) => s.label === "LIVE" || s.rows.length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayCharts, yesterdayCharts, allCharts, firstEntryBySlug, minuteKey]);
+  }, [todayCharts, yesterdayCharts, allCharts, firstEntryBySlug, minuteKey, hiddenAll]);
 
   /* ------------------ monthly chart: month/year live in URL ----------------- */
   const [sel, setSel] = useState<{ month: number; year: number } | null>(null);
@@ -227,16 +239,19 @@ export default function HomePage() {
     let alive = true;
     const key = `m-${sel.year}-${sel.month}`;
     setMonthCharts(getCachedCharts(key) as ApiChart[]); // instant from cache
+    setHiddenMonth(getCachedHidden(key));
     fetchChartsResilient(`/api/charts?year=${sel.year}&month=${sel.month}`, key).then((d) => {
-      if (alive && d) setMonthCharts(d as ApiChart[]);
+      if (!alive) return;
+      if (d) setMonthCharts(d as ApiChart[]);
+      setHiddenMonth(getCachedHidden(key));
     });
     return () => { alive = false; };
   }, [sel]);
 
   const monthlyRows = useMemo(
-    () => (sel ? buildMonthlyRows(MONTHLY_COLUMNS, sel, monthCharts, today, nowMinutes, firstEntryBySlug) : []),
+    () => (sel ? buildMonthlyRows(MONTHLY_COLUMNS, sel, monthCharts, today, nowMinutes, firstEntryBySlug, hiddenMonth) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sel, monthCharts, firstEntryBySlug, minuteKey, today.day]
+    [sel, monthCharts, firstEntryBySlug, minuteKey, today.day, hiddenMonth]
   );
 
   /** Full page navigation (reload) to the requested month. */
@@ -250,7 +265,7 @@ export default function HomePage() {
   const nextDate = new Date(selYear, selMonth, 1);
   const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
 
-  const tagline = `Daily Superfast Dhan Kuber Result of ${ordinal(today.day)} ${MONTH_NAMES[today.month - 1]} ${today.year} And Leak Numbers for ${SPECIAL_NAMES} With Complete Old Dhan Kuber Chart of ${taglineYears().join(", ")} From Dhan Kuber, Dhan Kuber Gali, Dhan Kuber Desawar, Dhan Kuber Ghaziabad, Dhan Kuber Faridabad.`;
+  const tagline = `Daily Superfast onlinekhiwal Result of ${ordinal(today.day)} ${MONTH_NAMES[today.month - 1]} ${today.year} And Leak Numbers for ${SPECIAL_NAMES} With Complete Old onlinekhiwal Chart of ${taglineYears().join(", ")} From onlinekhiwal, onlinekhiwal Gali, onlinekhiwal Desawar, onlinekhiwal Ghaziabad, onlinekhiwal Faridabad.`;
 
   /* --------------------------------- render -------------------------------- */
   return (
@@ -264,12 +279,14 @@ export default function HomePage() {
 
         <div className="mt-6 space-y-6">
           <LiveResultsTable
-            banner={`Dhan Kuber Results of ${longDate(today)} & ${longDate(yesterday)}`}
+            banner={`onlinekhiwal Results of ${longDate(today)} & ${longDate(yesterday)}`}
             col1={`${weekdayOf(yesterday)}. ${ordinal(yesterday.day)}`}
             col2={`${weekdayOf(today)}. ${ordinal(today.day)}`}
             sections={booted ? sections : []}
             showFooter
           />
+
+           <PanditPromo />
 
           <div className="bg-[#1565d8] px-4 py-3 text-center text-sm text-white sm:text-base">
             <span className="mr-1 font-bold text-[#ff8a80]">New:</span>
@@ -278,7 +295,7 @@ export default function HomePage() {
 
           <div id="mix-chart">
             <MonthlyChartTable
-              title={`Monthly Dhan Kuber Result Chart of ${MONTH_NAMES[selMonth - 1]} ${selYear} for ${SPECIAL_NAMES}`}
+              title={`Monthly onlinekhiwal Result Chart of ${MONTH_NAMES[selMonth - 1]} ${selYear} for ${SPECIAL_NAMES}`}
               columns={MONTHLY_COLUMNS}
               rows={monthlyRows}
               prevLabel={`${MONTH_SHORT[prevDate.getMonth()]} ${prevDate.getFullYear()}`}

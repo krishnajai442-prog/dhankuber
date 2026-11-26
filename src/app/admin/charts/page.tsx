@@ -369,8 +369,8 @@ export default function AdminChartsPage() {
                 {view === "today" && statusFilter === "false" && (
                   <>Showing <span className="font-semibold text-gray-700">inactive</span> charts in action order for the current date.</>
                 )}
-                {view === "special" && (
-                  <>Showing the <span className="font-semibold text-gray-700">4 special tables</span> (Gali, Desawar, Faridabad, Ghaziabad) — full history, newest first per table. Use <span className="font-semibold text-gray-700">Add Chart</span> to backfill past dates for these.</>
+                 {view === "special" && (
+                  <>Showing the <span className="font-semibold text-gray-700">5 special tables</span> (Gali, Desawar, Faridabad, Haruf King, Ghaziabad) — full history, newest first per table. Haruf King uses a <span className="font-semibold text-gray-700">3-digit</span> number. Use <span className="font-semibold text-gray-700">Add Chart</span> to backfill past dates for these.</>
                 )}
                 {view === "tables" && (
                   <>Showing <span className="font-semibold text-gray-700">all tables</span> A → Z (latest entry of each market) — same count as Total Charts.</>
@@ -430,7 +430,7 @@ export default function AdminChartsPage() {
                   Today
                 </Button>
                 <Button type="button" variant={view === "special" ? "secondary" : "outline"} onClick={() => switchView("special")}>
-                  Special 4
+                  Special 5
                 </Button>
                 <Button type="button" variant={view === "tables" ? "secondary" : "outline"} onClick={() => switchView("tables")}>
                   All Tables

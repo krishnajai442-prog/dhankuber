@@ -1,16 +1,15 @@
 {
-  "name": "Dhan Kuber",
-  "short_name": "Dhan Kuber",
-  "description": "Live Dhan Kuber Results & Charts",
+  "name": "OnlineKhiwal — Online Khiwal & Live Satta Results",
+  "short_name": "OnlineKhiwal",
+  "description": "Daily satta results and monthly record charts for Gali, Desawar, Faridabad, Haruf King and Ghaziabad.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#2563eb",
+  "theme_color": "#c62828",
+  "lang": "en-IN",
   "icons": [
-    {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
-    }
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
   ]
 }

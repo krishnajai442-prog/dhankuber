@@ -66,7 +66,7 @@ export default function AdminLoginPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6" aria-label="Dhan Kuber Home">
             <div className="w-14 h-14 rounded-xl bg-primary-600 flex items-center justify-center">
-              <span className="text-white font-bold text-2xl">SK</span>
+              <span className="text-white font-bold text-2xl">OK</span>
             </div>
           </Link>
           <h1 className="text-3xl font-bold text-gray-900">Admin Panel</h1>

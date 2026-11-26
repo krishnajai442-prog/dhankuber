@@ -45,6 +45,7 @@ FILE: package.json
     "start": "next start",
     "lint": "next lint",
     "seed": "tsx scripts/seed-admin.ts",
+    "reset:admin": "tsx scripts/reset-admin-password.ts",
     "db:push": "tsx scripts/db-push.ts"
   },
   "dependencies": {
@@ -169,15 +170,19 @@ src/
 
 1. Clone the repository
 2. Install dependencies:
+
    ```bash
    npm install
    ```
 
 3. Configure environment variables:
+
    ```bash
    cp .env.example .env.local
    ```
+
    Edit `.env.local` with your configuration:
+
    ```env
    MONGODB_URI=mongodb://localhost:27017/Dhan-Kuber
    ADMIN_SECRET_KEY=your-super-secret-key-min-32-chars-long
@@ -186,12 +191,14 @@ src/
    ```
 
 4. Initialize database and create admin user:
+
    ```bash
    npm run db:push
    npm run seed
    ```
 
 5. Start development server:
+
    ```bash
    npm run dev
    ```
@@ -208,24 +215,26 @@ src/
 
 ## Available Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start development server |
-| `npm run build` | Build for production |
-| `npm run start` | Start production server |
-| `npm run lint` | Run ESLint |
-| `npm run seed` | Create initial admin user |
-| `npm run db:push` | Create database indexes |
+| Command           | Description               |
+| ----------------- | ------------------------- |
+| `npm run dev`     | Start development server  |
+| `npm run build`   | Build for production      |
+| `npm run start`   | Start production server   |
+| `npm run lint`    | Run ESLint                |
+| `npm run seed`    | Create initial admin user |
+| `npm run db:push` | Create database indexes   |
 
 ## Admin Panel Features
 
 ### Dashboard
+
 - Total charts count
 - Active results count
 - Today's entries
 - Latest added charts
 
 ### Charts Management
+
 - **Add Chart**: Create new chart entries with all fields
 - **Edit Chart**: Modify existing chart data
 - **Delete Chart**: Remove charts with confirmation
@@ -235,6 +244,7 @@ src/
 - **Active/Inactive**: Toggle visibility
 
 ### Date/Year Management
+
 - Dynamic year options from database
 - Future year support (2025, 2026, 2027+)
 - Month/date filtering based on available data
@@ -287,17 +297,21 @@ SESSION_SECURE=true
 ## Customization
 
 ### Markets/Charts
+
 Edit `COMMON_CHARTS` array in `src/components/admin/ChartForm.tsx`
 
 ### Colors
+
 Modify `tailwind.config.ts` for custom color palette
 
 ### Announcements
+
 Update default announcements in `src/app/page.tsx`
 
 ## API Endpoints
 
 ### Public
+
 - `GET /api/charts` - Get charts with filters
 - `GET /api/charts/years` - Get available years
 - `GET /api/charts/months?year=` - Get months for year
@@ -305,6 +319,7 @@ Update default announcements in `src/app/page.tsx`
 - `POST /api/contact` - Contact form
 
 ### Admin (Protected)
+
 - `POST /api/admin/login` - Admin login
 - `POST /api/admin/logout` - Admin logout
 - `GET /api/admin/me` - Get current admin
@@ -327,6 +342,7 @@ MIT License - feel free to use for your projects.
 ## Support
 
 For issues or questions, please create a GitHub issue.
+
 
 ============================================================
 FILE: scripts\db-push.ts
@@ -402,54 +418,115 @@ async function main() {
 main();
 
 ============================================================
+FILE: scripts\reset-admin-password.ts
+============================================================
+
+/**
+ * Reset an admin password directly in MongoDB.
+ * Usage: npm run reset:admin -- <username> <newPassword>
+ * Target a specific DB by setting MONGODB_URI in the shell first
+ * (dotenv never overrides an env var that is already set).
+ */
+import dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
+
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
+
+async function main() {
+  const uri = process.env.MONGODB_URI;
+  const username = (process.argv[2] || "admin").trim();
+  const newPassword = process.argv[3];
+
+  if (!uri) {
+    console.error("❌ MONGODB_URI is not set.");
+    process.exit(1);
+  }
+  if (!newPassword || newPassword.length < 8) {
+    console.error("Usage: npm run reset:admin -- <username> <newPassword  (8+ characters)>");
+    process.exit(1);
+  }
+
+  await mongoose.connect(uri);
+  console.log(`Connected → host: ${mongoose.connection.host} | database: ${mongoose.connection.name}`);
+
+  const db = mongoose.connection.db!;
+  const admins = db.collection("admins");
+  const existing = await admins.findOne({ username });
+
+  if (!existing) {
+    const list = await admins.find({}, { projection: { username: 1, role: 1 } }).toArray();
+    console.error(`❌ No admin named "${username}" in this database.`);
+    console.error("   Admins present:", list.map((a) => a.username));
+    console.error("   Collections:", (await db.listCollections().toArray()).map((c) => c.name));
+    await mongoose.disconnect();
+    process.exit(1);
+  }
+
+  const hash = await bcrypt.hash(newPassword, 12);
+  const res = await admins.updateOne(
+    { _id: existing._id },
+    { $set: { password: hash, isActive: true, updatedAt: new Date() } }
+  );
+
+  console.log(`✅ Password reset for "${username}" — matched ${res.matchedCount}, modified ${res.modifiedCount}`);
+  console.log("   Log in on the site that uses THIS database, then change it again in Settings if you like.");
+  await mongoose.disconnect();
+}
+
+main().catch(async (err) => {
+  console.error("Reset failed:", err);
+  try { await mongoose.disconnect(); } catch {}
+  process.exit(1);
+});
+
+============================================================
 FILE: scripts\seed-admin.ts
 ============================================================
 
 import * as dotenv from "dotenv";
 import path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
-
 import mongoose from "mongoose";
 import connectDB from "@/lib/mongodb";
 import Admin from "@/models/Admin";
 
 async function seedAdmin() {
+  const username = process.env.ADMIN_USERNAME || "admin";
+  const password = process.env.ADMIN_PASSWORD || "admin123";
+  const email = process.env.ADMIN_EMAIL || `${username}@localhost`;
   try {
     await connectDB();
-
-    const existingAdmin = await Admin.findOne({ username: "admin" });
-
+    const existingAdmin = await Admin.findOne({ username });
     if (existingAdmin) {
-      // Update password for existing admin (fixes double-hash issue)
-      existingAdmin.passwordHash = "admin123";
+      // Plain password here — the model's pre-save hook hashes it exactly once
+      existingAdmin.passwordHash = password;
+      existingAdmin.isActive = true;
+      existingAdmin.loginAttempts = 0;
+      existingAdmin.lockUntil = undefined;
       await existingAdmin.save();
-      console.log("Admin password reset successfully");
+      console.log(`Admin "${username}" password reset from .env.local successfully`);
       process.exit(0);
     }
-
-    // Pass plain password - the model's pre-save hook will hash it
     const admin = await Admin.create({
-      username: "admin",
-      email: "admin@sattaking.example.com",
-      passwordHash: "admin123",
+      username,
+      email,
+      passwordHash: password,
       role: "super_admin",
       isActive: true,
     });
-
     console.log("Admin user created successfully:", {
       id: (admin._id as mongoose.Types.ObjectId).toString(),
       username: admin.username,
       email: admin.email,
       role: admin.role,
     });
-
     process.exit(0);
   } catch (error) {
     console.error("Error seeding admin:", error);
     process.exit(1);
   }
 }
-
 seedAdmin();
 
 ============================================================
@@ -1636,6 +1713,139 @@ export default function AdminChartAddPage() {
 }
 
 ============================================================
+FILE: src\app\admin\charts\bulk-import\page.tsx
+============================================================
+
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { AdminSidebar } from "@/components/admin/AdminSidebar";
+import { AdminHeader } from "@/components/admin/AdminHeader";
+import { Button } from "@/components/shared/Button";
+import { Loading } from "@/components/shared/Loading";
+import { Upload, Eye, ArrowLeft } from "lucide-react";
+
+const SAMPLE = `Monthly Result Chart of November 2026
+DATE\tDSWR\tFRBD\tGZBD\tGALI
+01\tXX\t77\t63\t82
+02\t64\t20\t79\t78
+03\t99\t51\t15\t74`;
+
+export default function BulkImportPage() {
+  const router = useRouter();
+  const [user, setUser] = useState<{ username: string; role: string } | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string; data?: any } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/me");
+        if (res.ok) {
+          const d = await res.json();
+          if (d.success) setUser(d.data);
+          else router.push("/admin/login");
+        } else router.push("/admin/login");
+      } catch { router.push("/admin/login"); }
+      finally { setIsLoading(false); }
+    })();
+  }, [router]);
+
+  const send = async (dryRun: boolean) => {
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/admin/charts/bulk-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, dryRun }),
+      });
+      const d = await res.json();
+      setResult({ ok: Boolean(d.success), msg: d.message || "Done", data: d.data });
+    } catch {
+      setResult({ ok: false, msg: "Network error — try again" });
+    } finally { setBusy(false); }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="admin-layout">
+        <AdminSidebar isCollapsed={isSidebarCollapsed} onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)} user={user || undefined} />
+        <div className="admin-main">
+          <AdminHeader user={user!} pageTitle="Bulk Import" breadcrumbs={[{ label: "Charts", href: "/admin/charts" }, { label: "Bulk Import" }]} />
+          <div className="admin-content"><Loading text="Loading..." /></div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="admin-layout">
+      <AdminSidebar isCollapsed={isSidebarCollapsed} onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)} user={user || undefined} />
+      <div className="admin-main">
+        <AdminHeader user={user!} pageTitle="Bulk Import — Special 4" breadcrumbs={[{ label: "Charts", href: "/admin/charts" }, { label: "Bulk Import" }]} />
+        <div className="admin-content max-w-4xl mx-auto space-y-6">
+
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold text-gray-900">Paste monthly charts (Desawar · Faridabad · Ghaziabad · Gali)</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Paste one month or many. Each block needs a line containing the month + year (e.g. <em>November 2026</em>) and a
+              <span className="font-mono"> DATE DSWR FRBD GZBD GALI</span> header. Tab or space separated both work.
+              <strong> XX</strong> and leading zeros (<span className="font-mono">02</span>) are stored exactly as pasted.
+            </p>
+
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={16}
+              spellCheck={false}
+              placeholder={SAMPLE}
+              className="input mt-4 font-mono text-xs leading-relaxed"
+            />
+
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Button type="button" variant="outline" onClick={() => send(true)} disabled={busy || !text.trim()}>
+                <Eye className="mr-2 h-4 w-4" /> Preview
+              </Button>
+              <Button type="button" variant="primary" onClick={() => send(false)} loading={busy} disabled={!text.trim()}>
+                <Upload className="mr-2 h-4 w-4" /> Import
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setText(SAMPLE)} disabled={busy}>
+                Load sample
+              </Button>
+              <Link href="/admin/charts" className="btn btn-ghost ml-auto">
+                <ArrowLeft className="mr-2 h-4 w-4" /> Back to Charts
+              </Link>
+            </div>
+          </div>
+
+          {result && (
+            <div className={`card p-6 ${result.ok ? "border-success-200 bg-success-50" : "border-danger-200 bg-danger-50"}`}>
+              <p className={`font-semibold ${result.ok ? "text-success-700" : "text-danger-700"}`}>{result.msg}</p>
+              {result.data?.months?.length > 0 && (
+                <p className="mt-2 text-sm text-gray-700">
+                  Months: {result.data.months.join(", ")}
+                </p>
+              )}
+              {result.data?.notes?.length > 0 && (
+                <ul className="mt-3 list-disc pl-5 text-xs text-gray-600">
+                  {result.data.notes.slice(0, 10).map((n: string, i: number) => <li key={i}>{n}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+============================================================
 FILE: src\app\admin\charts\edit\[id]\page.tsx
 ============================================================
 
@@ -1875,9 +2085,9 @@ import { Button } from "@/components/shared/Button";
 import { Input } from "@/components/shared/Input";
 import { Select } from "@/components/shared/Select";
 import { Loading } from "@/components/shared/Loading";
-import { Plus, Search, X, RefreshCw } from "lucide-react";
+import { Plus, Search, X, RefreshCw, Upload } from "lucide-react";
 import { clsx } from "clsx";
-import { marketKey } from "@/lib/markets";
+import { SPECIAL_MARKETS, dateKey, getDrawTime, istNow, marketKey, minutesOf, slugify } from "@/lib/markets";
 
 /* ---------------------------------- types --------------------------------- */
 
@@ -1892,6 +2102,7 @@ interface ChartData {
   isHighlighted: boolean;
   isActive: boolean;
   formattedDate: string;
+  drawTime?: string | null;
   createdAt: Date;
   updatedAt: Date;
   stale?: boolean;
@@ -1904,13 +2115,13 @@ interface Pagination {
   totalPages: number;
 }
 
-type ViewMode = "today" | "tables" | "alldates";
+type ViewMode = "today" | "special" | "tables" | "alldates";
 
-/* -------------------------------- helpers --------------------------------- */
+/* --------------------------------- helpers -------------------------------- */
 
-/** Fresh "today" strings (recomputed so it stays correct across midnight). */
+/** Fresh IST "today" strings (same clock as the action-order sort; correct across midnight). */
 function todayParts() {
-  const n = new Date();
+  const n = istNow();
   return {
     date: String(n.getDate()),
     month: String(n.getMonth() + 1),
@@ -1921,10 +2132,24 @@ function todayParts() {
 const byName = (a: ChartData, b: ChartData) =>
   a.chartName.localeCompare(b.chartName, undefined, { sensitivity: "base" });
 
+const byNewest = (a: ChartData, b: ChartData) =>
+  dateKey(b.year, b.month, b.date) - dateKey(a.year, a.month, a.date);
+
 async function readCharts(res: Response): Promise<ChartData[]> {
   if (!res.ok) return [];
   const d = await res.json();
   return d?.success ? (d.data.charts as ChartData[]) : [];
+}
+
+/** Client-side paginate a fully-built row list (used by today + special views). */
+function paginate(rows: ChartData[], page: number, limit: number) {
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const safePage = Math.min(page, totalPages);
+  return {
+    slice: rows.slice((safePage - 1) * limit, safePage * limit),
+    pagination: { page: safePage, limit, total, totalPages },
+  };
 }
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
@@ -1932,7 +2157,7 @@ const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
   label: new Date(2000, i).toLocaleString("default", { month: "long" }),
 }));
 
-/* --------------------------------- page ----------------------------------- */
+/* ---------------------------------- page ---------------------------------- */
 
 export default function AdminChartsPage() {
   const router = useRouter();
@@ -1951,7 +2176,10 @@ export default function AdminChartsPage() {
 
   // view + filters (seeded from URL)
   const initialView: ViewMode =
-    searchParams.get("view") === "tables" ? "tables" : searchParams.get("view") === "alldates" ? "alldates" : "today";
+    searchParams.get("view") === "tables" ? "tables"
+      : searchParams.get("view") === "alldates" ? "alldates"
+      : searchParams.get("view") === "special" ? "special"
+      : "today";
   const [view, setView] = useState<ViewMode>(initialView);
   const [search, setSearch] = useState(searchParams.get("search") || "");
   const [dateFilter, setDateFilter] = useState(searchParams.get("date") || (initialView === "today" ? todayParts().date : ""));
@@ -2000,14 +2228,14 @@ export default function AdminChartsPage() {
       if (statusFilter !== "all") base.set("isActive", statusFilter);
 
       if (view === "today") {
-        // Updated-for-today charts first (A→Z), then tables still needing today's update (A→Z).
+        // Tables that already have a row for the selected date…
         const updatedParams = new URLSearchParams(base);
         if (dateFilter) updatedParams.set("date", dateFilter);
         if (monthFilter) updatedParams.set("month", monthFilter);
         if (yearFilter) updatedParams.set("year", yearFilter);
-
         const updatedRows = await readCharts(await fetch(`/api/admin/charts?${updatedParams}`));
 
+        // …plus tables that still need today's update (latest entry of each market).
         let staleRows: ChartData[] = [];
         if (statusFilter === "all") {
           const staleParams = new URLSearchParams(base);
@@ -2019,16 +2247,49 @@ export default function AdminChartsPage() {
             .map((r) => ({ ...r, stale: true }));
         }
 
-        updatedRows.sort(byName);
-        staleRows.sort(byName);
+        // ACTION ORDER (3 tiers):
+        //  1) needs action & draw time passed (pending / no entry today) → most overdue first
+        //  2) upcoming draws → next one first
+        //  3) already published → last
+        const now = istNow();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        const drawMins = (r: ChartData) => minutesOf(getDrawTime(slugify(r.chartName), r.drawTime));
+        const needsAction = (r: ChartData) => Boolean(r.stale) || !(r.result || "").trim();
+        const actionKey = (r: ChartData) => {
+          const m = drawMins(r);
+          const passed = nowMinutes >= m;
+          if (passed && needsAction(r)) return -(nowMinutes - m);
+          if (!passed) return m - nowMinutes;
+          return 1_000_000 + (nowMinutes - m);
+        };
+        const combined = [...updatedRows, ...staleRows].sort(
+          (a, b) => actionKey(a) - actionKey(b) || byName(a, b)
+        );
 
-        const combined = [...updatedRows, ...staleRows];
-        const limit = pagination.limit;
-        const total = combined.length;
-        const totalPages = Math.max(1, Math.ceil(total / limit));
-        const safePage = Math.min(page, totalPages);
-        setCharts(combined.slice((safePage - 1) * limit, safePage * limit));
-        setPagination({ page: safePage, limit, total, totalPages });
+        const p = paginate(combined, page, pagination.limit);
+        setCharts(p.slice);
+        setPagination(p.pagination);
+      } else if (view === "special") {
+        // Self-contained Special 4: fetch each special market by name, keep EXACT matches.
+        // Works with the existing API (no `special=1` backend filter needed).
+        const lists = await Promise.all(
+          SPECIAL_MARKETS.map((name) => {
+            const p = new URLSearchParams({ page: "1", limit: "100", sortBy: "chartName", sortOrder: "asc", search: name });
+            if (dateFilter) p.set("date", dateFilter);
+            if (monthFilter) p.set("month", monthFilter);
+            if (yearFilter) p.set("year", yearFilter);
+            if (statusFilter !== "all") p.set("isActive", statusFilter);
+            return fetch(`/api/admin/charts?${p}`).then(readCharts);
+          })
+        );
+        const wanted = new Set(SPECIAL_MARKETS.map((n) => marketKey(n)));
+        let rows = lists.flat().filter((r) => wanted.has(marketKey(r.chartName)));
+        if (search) rows = rows.filter((r) => r.chartName.toLowerCase().includes(search.toLowerCase()));
+        rows.sort((a, b) => byName(a, b) || byNewest(a, b));
+
+        const p = paginate(rows, page, pagination.limit);
+        setCharts(p.slice);
+        setPagination(p.pagination);
       } else {
         const params = new URLSearchParams({
           page: page.toString(),
@@ -2064,6 +2325,14 @@ export default function AdminChartsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pagination.page, search, dateFilter, monthFilter, yearFilter, statusFilter, view]);
 
+  // Re-sort every minute so the top always tracks the clock (today view only).
+  useEffect(() => {
+    if (view !== "today") return;
+    const t = setInterval(() => fetchCharts(pagination.page), 60000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, pagination.page]);
+
   // On first load: merge case-duplicates, sync default markets, then refresh.
   useEffect(() => {
     const boot = async () => {
@@ -2083,7 +2352,7 @@ export default function AdminChartsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* -------------------------------- actions -------------------------------- */
+  /* --------------------------------- actions -------------------------------- */
   const switchView = (v: ViewMode) => {
     const t = todayParts();
     setView(v);
@@ -2167,13 +2436,16 @@ export default function AdminChartsPage() {
               <h2 className="text-xl font-semibold text-gray-900">All Charts</h2>
               <p className="text-sm text-gray-500">
                 {view === "today" && statusFilter === "all" && (
-                  <>Showing <span className="font-semibold text-gray-700">today's</span> charts A → Z — updated first, then tables that still need today's update. Click a row to edit / update it.</>
+                  <>Showing <span className="font-semibold text-gray-700">today's</span> tables in <span className="font-semibold text-gray-700">action order</span> — overdue / pending results first, then the next upcoming draws, published tables last. Click a row to edit / update it.</>
                 )}
                 {view === "today" && statusFilter === "true" && (
-                  <>Showing <span className="font-semibold text-gray-700">Active Results</span> A → Z — only charts updated for the current date.</>
+                  <>Showing <span className="font-semibold text-gray-700">Active Results</span> in action order (next draw first) — only charts updated for the current date.</>
                 )}
                 {view === "today" && statusFilter === "false" && (
-                  <>Showing <span className="font-semibold text-gray-700">inactive</span> charts A → Z for the current date.</>
+                  <>Showing <span className="font-semibold text-gray-700">inactive</span> charts in action order for the current date.</>
+                )}
+                {view === "special" && (
+                  <>Showing the <span className="font-semibold text-gray-700">4 special tables</span> (Gali, Desawar, Faridabad, Ghaziabad) — full history, newest first per table. Use <span className="font-semibold text-gray-700">Add Chart</span> to backfill past dates for these.</>
                 )}
                 {view === "tables" && (
                   <>Showing <span className="font-semibold text-gray-700">all tables</span> A → Z (latest entry of each market) — same count as Total Charts.</>
@@ -2188,6 +2460,10 @@ export default function AdminChartsPage() {
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Sync Default Markets
               </Button>
+                 <Link href="/admin/charts/bulk-import" className="btn btn-outline">
+                <Upload className="mr-2 h-4 w-4" />
+                Bulk Import
+              </Link>
               <Link href="/admin/charts/add" className="btn btn-primary">
                 <Plus className="mr-2 h-4 w-4" />
                 Add Chart
@@ -2227,6 +2503,9 @@ export default function AdminChartsPage() {
                 </Button>
                 <Button type="button" variant={view === "today" ? "secondary" : "outline"} onClick={() => switchView("today")}>
                   Today
+                </Button>
+                <Button type="button" variant={view === "special" ? "secondary" : "outline"} onClick={() => switchView("special")}>
+                  Special 4
                 </Button>
                 <Button type="button" variant={view === "tables" ? "secondary" : "outline"} onClick={() => switchView("tables")}>
                   All Tables
@@ -2498,7 +2777,7 @@ export default function AdminLoginPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6" aria-label="Dhan Kuber Home">
             <div className="w-14 h-14 rounded-xl bg-primary-600 flex items-center justify-center">
-              <span className="text-white font-bold text-2xl">SK</span>
+              <span className="text-white font-bold text-2xl">OK</span>
             </div>
           </Link>
           <h1 className="text-3xl font-bold text-gray-900">Admin Panel</h1>
@@ -2802,6 +3081,163 @@ export async function GET() {
 }
 
 ============================================================
+FILE: src\app\api\admin\charts\bulk-import\route.ts
+============================================================
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import connectDB from "@/lib/mongodb";
+import Chart from "@/models/Chart";
+import { verifyToken } from "@/lib/auth";
+import { getDefaultDrawTime } from "@/lib/markets";
+
+/* DSWR / FRBD / GZBD / GALI → internal slugs (full names also accepted). */
+const COLUMN_MAP: Record<string, string> = {
+  DSWR: "desawar", DESAWAR: "desawar", DESAWER: "desawar",
+  FRBD: "faridabad", FARIDABAD: "faridabad",
+  GZBD: "ghaziabad", GHAZIABAD: "ghaziabad", GAZIABAD: "ghaziabad",
+  GALI: "gali",
+};
+const NAMES: Record<string, string> = {
+  desawar: "Desawar", faridabad: "Faridabad", ghaziabad: "Ghaziabad", gali: "Gali",
+};
+const MONTHS = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+
+interface ParsedRow { year: number; month: number; day: number; values: Record<string, string>; }
+
+/** Parses one OR many month blocks pasted together. */
+function parseChartText(text: string, fallback?: { month: number; year: number }) {
+  const rows: ParsedRow[] = [];
+  const notes: string[] = [];
+  let cur: { month: number; year: number } | null = fallback ?? null;
+  let cols: (string | null)[] | null = null;
+
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    // "… Chart of November 2026 for …"  → starts a new month block
+    const hm = line.match(/(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})/i);
+    if (hm) {
+      cur = { month: MONTHS.indexOf(hm[1].toLowerCase()) + 1, year: parseInt(hm[2], 10) };
+      cols = null;
+      continue;
+    }
+
+    const tokens = line.split(/\t+|\s+/).filter(Boolean);
+
+    // "DATE  DSWR  FRBD  GZBD  GALI"
+    if (/^date$/i.test(tokens[0])) {
+      cols = tokens.slice(1).map((t) => COLUMN_MAP[t.toUpperCase().replace(/[^A-Z]/g, "")] ?? null);
+      continue;
+    }
+
+    // data row must start with a day number
+    if (!/^\d{1,2}$/.test(tokens[0])) continue;
+    if (!cur || !cols) {
+      notes.push(`Skipped "${line.slice(0, 40)}" — no month/year header above it`);
+      continue;
+    }
+    const day = parseInt(tokens[0], 10);
+    if (day < 1 || day > 31) continue;
+
+    const values: Record<string, string> = {};
+    cols.forEach((slug, i) => {
+      const v = tokens[i + 1];
+      if (!slug || !v) return;           // missing trailing cells are simply absent
+      values[slug] = v.toUpperCase();     // keeps "02", "XX", "--" exactly as pasted
+    });
+    if (Object.keys(values).length) rows.push({ year: cur.year, month: cur.month, day, values });
+  }
+  return { rows, notes };
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get("admin_session")?.value;
+    if (!token) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
+    const payload = await verifyToken(token);
+    if (!payload || !["super_admin", "admin", "editor"].includes(payload.role)) {
+      return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 403 });
+    }
+
+    const body = await request.json();
+    const text: string = body?.text || "";
+    const dryRun: boolean = Boolean(body?.dryRun);
+    const fallback = body?.month && body?.year
+      ? { month: Number(body.month), year: Number(body.year) }
+      : undefined;
+
+    if (!text.trim()) {
+      return NextResponse.json({ success: false, message: "Paste the chart text first" }, { status: 400 });
+    }
+
+    const { rows, notes } = parseChartText(text, fallback);
+    if (rows.length === 0) {
+      return NextResponse.json({
+        success: false,
+        message: "No rows recognised. Include a '… November 2026 …' line and a 'DATE DSWR FRBD GZBD GALI' header.",
+        notes,
+      }, { status: 400 });
+    }
+
+    // Build upsert operations — one per (market, day)
+    const ops = rows.flatMap((r) =>
+      Object.entries(r.values).map(([slug, value]) => ({
+        updateOne: {
+          filter: { chartName: NAMES[slug], date: r.day, month: r.month, year: r.year },
+          update: {
+            $set: { result: value, isActive: true, drawTime: getDefaultDrawTime(slug) },
+            $setOnInsert: {
+              chartName: NAMES[slug], date: r.day, month: r.month, year: r.year,
+              displayOrder: 0, isHighlighted: false,
+            },
+          },
+          upsert: true,
+        },
+      }))
+    );
+
+    const months = Array.from(new Set(rows.map((r) => `${r.year}-${String(r.month).padStart(2, "0")}`))).sort();
+
+    if (dryRun) {
+      return NextResponse.json({
+        success: true,
+        message: `Preview: ${ops.length} cells across ${rows.length} days / ${months.length} month(s)`,
+        data: { dryRun: true, cells: ops.length, days: rows.length, months, notes, sample: rows.slice(0, 5) },
+      });
+    }
+
+    if (ops.length > 20000) {
+      return NextResponse.json({ success: false, message: "Too many cells in one go — paste fewer months at a time (max ~20,000)." }, { status: 400 });
+    }
+
+    await connectDB();
+    const res = await Chart.bulkWrite(ops, { ordered: false });
+
+    return NextResponse.json({
+      success: true,
+      message: `Imported ${ops.length} cells — ${res.upsertedCount} new, ${res.modifiedCount} updated.`,
+      data: {
+        cells: ops.length,
+        created: res.upsertedCount,
+        updated: res.modifiedCount,
+        days: rows.length,
+        months,
+        notes,
+      },
+    });
+  } catch (error) {
+    console.error("Bulk import error:", error);
+    return NextResponse.json({ success: false, message: "Import failed" }, { status: 500 });
+  }
+}
+
+============================================================
 FILE: src\app\api\admin\charts\dates\route.ts
 ============================================================
 
@@ -2938,7 +3374,7 @@ import connectDB from "@/lib/mongodb";
 import Chart from "@/models/Chart";
 import { verifyToken } from "@/lib/auth";
 import {
-  DEFAULT_MARKETS, addDays, autoResult, escapeRegExp, getDefaultDrawTime, istNow, istToday, slugify,
+  DEFAULT_MARKETS, SPECIAL_MARKETS, addDays, autoResult, escapeRegExp, getDefaultDrawTime, istNow, istToday, slugify,
 } from "@/lib/markets";
 
 /**
@@ -2964,7 +3400,7 @@ export async function POST() {
     let created = 0;
 
     for (const day of [yesterday, today]) {
-      for (const name of DEFAULT_MARKETS) {
+          for (const name of [...DEFAULT_MARKETS, ...SPECIAL_MARKETS]) {
         const slug = slugify(name);
                const existing = await Chart.findOne({
           chartName: { $regex: `^${escapeRegExp(name)}$`, $options: "i" },
@@ -2974,8 +3410,9 @@ export async function POST() {
         });
         if (existing) {
           // Migrate rows that were seeded with the old 12:00 fallback to the real schedule
-          const def = getDefaultDrawTime(slug);
-          if ((!existing.drawTime || existing.drawTime === "12:00") && def !== "12:00") {
+           const def = getDefaultDrawTime(slug);
+          // Only fill when no time was ever set — an admin choice (even 12:00) is sacred.
+          if (!existing.drawTime && def) {
             existing.drawTime = def;
             await existing.save();
           }
@@ -3144,7 +3581,7 @@ import connectDB from "@/lib/mongodb";
 import Chart from "@/models/Chart";
 import { verifyToken } from "@/lib/auth";
 import { chartFilterSchema, chartSchema } from "@/lib/validations";
-import { canonicalMarketName, escapeRegExp, marketKey } from "@/lib/markets";
+import { canonicalMarketName, escapeRegExp, marketKey, SPECIAL_MARKETS } from "@/lib/markets";
 
 function formatChartDate(date: number, month: number, year: number): string {
   return `${String(date).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`;
@@ -3186,6 +3623,18 @@ export async function GET(request: NextRequest) {
     if (month) query.month = month;
     if (year) query.year = year;
     if (isActive && isActive !== "all") query.isActive = isActive === "true";
+
+    // Special 4 view: only the permanent special tables (any date).
+    if (searchParams.get("special") === "1") {
+      query.$or = SPECIAL_MARKETS.map((n) => ({
+        chartName: { $regex: `^${escapeRegExp(n)}$`, $options: "i" },
+      }));
+    }
+        if (searchParams.get("special") === "1") {
+      query.$or = SPECIAL_MARKETS.map((n) => ({
+        chartName: { $regex: `^${escapeRegExp(n)}$`, $options: "i" },
+      }));
+    }
 
     const latestOnly = searchParams.get("latest") === "1";
 
@@ -3347,7 +3796,7 @@ export async function GET() {
 
     await connectDB();
 
-    const years = await Chart.distinct("year").sort();
+    const years = (await Chart.distinct("year")).filter((y: number) => y >= 2015);
     const currentYear = new Date().getFullYear();
     // Generate years from 2012 to current year only
     const allYears = Array.from({ length: currentYear - 2012 + 1 }, (_, i) => 2012 + i);
@@ -3633,19 +4082,11 @@ export async function PUT(
       }
     }
 
+       // Updating a result always publishes the table → it falls under Active Results
     if (validation.data.result && validation.data.result !== chart.result) {
       chart.isActive = true;
     }
-
-    Object.assign(chart, validation.data);
-    await chart.save();
-
-    // Updating a result always publishes the table → it falls under Active Results
-    if (validation.data.result && validation.data.result !== chart.result) {
-      chart.isActive = true;
-    }
-
-    Object.assign(chart, validation.data);
+    Object.assign(chart, validation.data); // includes drawTime
     await chart.save();
     return NextResponse.json({
       success: true,
@@ -3694,11 +4135,58 @@ export async function DELETE(
 }
 
 ============================================================
-FILE: src\app\api\admin\login\route.ts
+FILE: src\app\api\admin\db-info\route.ts
 ============================================================
 
 export const dynamic = "force-dynamic";
 
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import mongoose from "mongoose";
+import connectDB from "@/lib/mongodb";
+import Chart from "@/models/Chart";
+import { verifyToken } from "@/lib/auth";
+import { SPECIAL_MARKETS, istNow, istToday } from "@/lib/markets";
+
+export async function GET() {
+  try {
+    const token = (await cookies()).get("admin_session")?.value;
+    if (!token) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
+    const payload = await verifyToken(token);
+    if (!payload) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 403 });
+
+    await connectDB();
+    const t = istToday(istNow());
+
+    const [total, monthTotal, special4] = await Promise.all([
+      Chart.countDocuments(),
+      Chart.countDocuments({ year: t.year, month: t.month }),
+      Chart.countDocuments({ year: t.year, month: t.month, chartName: { $in: SPECIAL_MARKETS } }),
+    ]);
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        database: mongoose.connection.name,
+        host: mongoose.connection.host,
+        environment: process.env.NODE_ENV,
+        totalCharts: total,
+        chartsThisMonth: monthTotal,
+        special4ThisMonth: special4,
+        today: `${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}`,
+      },
+    });
+  } catch (error) {
+    console.error("db-info error:", error);
+    return NextResponse.json({ success: false, message: "Failed to read database info" }, { status: 500 });
+  }
+}
+
+============================================================
+FILE: src\app\api\admin\login\route.ts
+============================================================
+
+export const dynamic = "force-dynamic";
 import mongoose from "mongoose";
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
@@ -3711,38 +4199,55 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const validation = loginSchema.safeParse(body);
-
     if (!validation.success) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid input",
-          errors: validation.error.flatten().fieldErrors,
-        },
+        { success: false, message: "Invalid input", errors: validation.error.flatten().fieldErrors },
         { status: 400 }
       );
     }
 
     await connectDB();
 
-    const admin = await Admin.findOne({
-      $or: [{ username: validation.data.username }, { email: validation.data.username }],
+    const username = validation.data.username;
+    const password = validation.data.password;
+
+    // Credentials from .env.local — the single source of truth for the owner account
+    const envUser = process.env.ADMIN_USERNAME || "admin";
+    const envPass = process.env.ADMIN_PASSWORD || "admin123";
+
+    let admin = await Admin.findOne({
+      $or: [{ username }, { email: username }],
     }).select("+passwordHash");
 
+    // ENV FALLBACK + SELF-HEAL:
+    // If the entered credentials match .env.local, make sure the DB account exists
+    // and its hash is correct (fixes broken / double-hashed passwords automatically).
+    if (username === envUser && password === envPass) {
+      if (!admin) {
+        // Create the owner account (model pre-save hook hashes the plain password)
+        admin = await Admin.create({
+          username: envUser,
+          email: process.env.ADMIN_EMAIL || `${envUser}@localhost`,
+          passwordHash: envPass,
+          role: "super_admin",
+          isActive: true,
+        });
+      } else if (!(await verifyPassword(envPass, admin.passwordHash))) {
+        // Stored hash is broken/double-hashed → repair it from the env password
+        admin.passwordHash = envPass; // pre-save hook re-hashes once → correct hash
+        admin.isActive = true;
+        admin.loginAttempts = 0;
+        admin.lockUntil = undefined;
+        await admin.save();
+      }
+    }
+
     if (!admin) {
-      return NextResponse.json(
-        { success: false, message: "Invalid username or password" },
-        { status: 401 }
-      );
+      return NextResponse.json({ success: false, message: "Invalid username or password" }, { status: 401 });
     }
-
     if (!admin.isActive) {
-      return NextResponse.json(
-        { success: false, message: "Account is deactivated. Contact administrator." },
-        { status: 401 }
-      );
+      return NextResponse.json({ success: false, message: "Account is deactivated. Contact administrator." }, { status: 401 });
     }
-
     if (admin.isLocked) {
       return NextResponse.json(
         { success: false, message: "Account temporarily locked due to too many failed attempts. Try again in 15 minutes." },
@@ -3750,14 +4255,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const isValid = await verifyPassword(validation.data.password, admin.passwordHash);
-
+    const isValid = await verifyPassword(password, admin.passwordHash);
     if (!isValid) {
       await admin.incrementLoginAttempts();
-      return NextResponse.json(
-        { success: false, message: "Invalid username or password" },
-        { status: 401 }
-      );
+      return NextResponse.json({ success: false, message: "Invalid username or password" }, { status: 401 });
     }
 
     await admin.resetLoginAttempts();
@@ -3787,10 +4288,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Login error:", error);
-    return NextResponse.json(
-      { success: false, message: "An error occurred during login" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, message: "An error occurred during login" }, { status: 500 });
   }
 }
 
@@ -3947,7 +4445,9 @@ export async function GET() {
     // ACTIVE RESULTS = ONLY the CURRENT DATE's tables that are Active.
     // (A table's entry for today is always created/updated today, so this equals
     //  "tables updated on the current date" — history never counts here.)
-    const totalResults = markets.filter((c) => c.isActive && isToday(c)).length;
+    const totalResults = markets.filter(
+    (c) => c.isActive && isToday(c) && (c.result || "").trim() !== ""
+  ).length;
     // TODAY'S ENTRIES = unique tables that have an entry dated today (always ≤ Total)
     const todaysEntries = markets.filter((c) => isToday(c)).length;
 
@@ -4077,65 +4577,63 @@ FILE: src\app\api\charts\route.ts
 ============================================================
 
 export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongodb";
 import Chart from "@/models/Chart";
+import { slugify } from "@/lib/markets";
 
-async function connectWithRetry(attempts = 5): Promise<void> {
-  let lastErr: unknown;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      await connectDB();
-      return;
-    } catch (e) {
-      lastErr = e;
-      await new Promise((r) => setTimeout(r, 300 * (i + 1)));
-    }
-  }
-  throw lastErr;
-}
-
+/**
+ * Public charts endpoint.
+ *
+ * - `data`   : only ACTIVE charts (filtered by scope)
+ * - `hidden` : slugs of markets whose LATEST entry is inactive
+ *              (so the front-end can hide their rows and stop auto-backfilling).
+ *
+ * Query params (all optional):
+ *   ?year=YYYY            restrict to that year
+ *   ?month=M              restrict to that month (1–12)
+ *   ?date=D               restrict to that day (1–31)
+ *
+ * Toggling a market's entry back to active makes it reappear — no other action needed.
+ */
 export async function GET(request: NextRequest) {
   try {
-    await connectWithRetry();
-    const { searchParams } = new URL(request.url);
-    const year = searchParams.get("year");
-    const month = searchParams.get("month");
-    const date = searchParams.get("date");
-    const chartName = searchParams.get("chartName");
-    const now = new Date();
-    const query: Record<string, unknown> = {
-      isActive: true,
-      $or: [{ scheduledAt: { $exists: false } }, { scheduledAt: null }, { scheduledAt: { $lte: now } }],
-    };
-    if (year) query.year = parseInt(year);
-    if (month) query.month = parseInt(month);
-    if (date) query.date = parseInt(date);
-    if (chartName) query.chartName = chartName;
-    const charts = await Chart.find(query).sort({ displayOrder: 1, chartName: 1 }).lean();
-    return NextResponse.json({
-      success: true,
-      data: charts.map((c) => ({
-        id: c._id.toString(),
-        chartName: c.chartName,
-        result: c.result,
-        openingResult: c.openingResult,
-        closingResult: c.closingResult,
-        date: c.date,
-        month: c.month,
-        year: c.year,
-        displayOrder: c.displayOrder,
-          isHighlighted: c.isHighlighted,
-          isActive: c.isActive,
-          scheduledAt: c.scheduledAt,
-          drawTime: c.drawTime,
-          formattedDate: c.formattedDate,
-          updatedAt: c.updatedAt,
-      })),
-    });
+    const sp = request.nextUrl.searchParams;
+    const year = sp.get("year");
+    const month = sp.get("month");
+    const date = sp.get("date");
+
+    const scope: Record<string, unknown> = {};
+    if (year) scope.year = Number(year);
+    if (month) scope.month = Number(month);
+    if (date) scope.date = Number(date);
+
+    await connectDB();
+
+    // TEMPORARY DELETE: a market is hidden when its LATEST entry is inactive.
+    // Sort newest-first so `$first` picks the newest entry's isActive flag.
+    const groups = await Chart.aggregate([
+      { $match: scope },
+      { $sort: { year: -1, month: -1, date: -1, updatedAt: -1 } },
+      { $group: { _id: "$chartName", latestActive: { $first: "$isActive" } } },
+      { $match: { latestActive: false } },
+    ]);
+    const hidden = (groups as Array<{ _id: string }>).map((g) => slugify(String(g._id)));
+
+    // Only ACTIVE entries reach the public front-end.
+    const charts = await Chart.find({ ...scope, isActive: true })
+      .sort({ displayOrder: 1, chartName: 1, date: 1 })
+      .select("chartName result date month year isHighlighted isActive drawTime displayOrder updatedAt")
+      .lean();
+
+    return NextResponse.json({ success: true, data: charts, hidden });
   } catch (error) {
-    console.error("Error fetching charts:", error);
-    return NextResponse.json({ success: false, message: "Failed to fetch charts" }, { status: 500 });
+    console.error("Public charts error:", error);
+    return NextResponse.json(
+      { success: false, message: "Failed to load charts", data: [], hidden: [] },
+      { status: 500 }
+    );
   }
 }
 
@@ -4153,7 +4651,7 @@ export async function GET() {
   try {
     await connectDB();
 
-    const years = await Chart.distinct("year").sort();
+    const years = (await Chart.distinct("year")).filter((y: number) => y >= 2015);
     const currentYear = new Date().getFullYear();
     // Generate years from 2012 to current year only
     const allYears = Array.from({ length: currentYear - 2012 + 1 }, (_, i) => 2012 + i);
@@ -4354,7 +4852,7 @@ export default function ContactPage() {
                 </div>
                 <div>
                   <h3 className="font-semibold text-gray-900">Email</h3>
-                  <p className="text-gray-600">support@sattaking.example.com</p>
+                  <p className="text-gray-600">support@onlinekhiwal.com</p>
                 </div>
               </div>
               <div className="flex items-start gap-4 p-4 bg-gray-50 rounded-lg">
@@ -4672,7 +5170,7 @@ export default function ContactFormPage() {
             <CheckCircle2 className="mx-auto mb-4 h-16 w-16 text-green-600" aria-hidden="true" />
             <p className="text-lg font-semibold text-gray-900">{t.success}</p>
             <Link href="/" className="mt-6 inline-block text-sm font-medium text-blue-600 hover:underline">
-              ← Dhan-Kuber.com
+              ← onlinekhiwal.com
             </Link>
           </div>
         )}
@@ -5057,6 +5555,85 @@ html:has(.admin-layout)::-webkit-scrollbar-corner {
   background: linear-gradient(180deg, #3b82f6, #1d4ed8);
 }
 
+/* ============================================================
+   RED-EYED DRAGON LOGO — glossy 3D emblem with red glow
+   ============================================================ */
+.dragon-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 24px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: radial-gradient(
+    120% 90% at 30% 0%,
+    #ffffff 0%,
+    #f6ece9 40%,
+    #e3cdc6 75%,
+    #caa9a0 100%
+  );
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, 0.9),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.25),
+    0 6px 12px rgba(0, 0, 0, 0.35),
+    0 0 24px rgba(220, 38, 38, 0.55),
+    /* eye-catching red glow */ 0 16px 28px rgba(0, 0, 0, 0.25);
+  transform: perspective(700px) rotateX(4deg);
+}
+
+.dragon-img {
+  width: 84%;
+  height: 84%;
+  object-fit: contain;
+  mix-blend-mode: multiply; /* melts the white image background into the badge */
+  filter: drop-shadow(0 2px 1px rgba(255, 255, 255, 0.55))
+    drop-shadow(0 3px 5px rgba(127, 29, 29, 0.45));
+}
+
+/* glass shine sweeping the top of the badge */
+.dragon-gloss {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(255, 255, 255, 0.5) 30%,
+    rgba(255, 255, 255, 0.12) 48%,
+    rgba(255, 255, 255, 0) 62%
+  );
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+/* polished rim with a red inner line */
+.dragon-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(153, 27, 27, 0.35);
+  pointer-events: none;
+}
+
+@media (max-width: 480px) {
+  .dragon-badge {
+    width: 68px;
+    height: 68px;
+    border-radius: 16px;
+  }
+}
+
+/* When the desktop rail is collapsed, pull the content in to match (w-16). */
+@media (min-width: 1024px) {
+  .admin-layout:has(.admin-sidebar[data-collapsed="true"]) .admin-main {
+    margin-left: 4rem;
+  }
+}
+
 
 ============================================================
 FILE: src\app\layout.tsx
@@ -5074,41 +5651,32 @@ export const viewport: Viewport = {
   themeColor: "#ffffff",
 };
 
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://onlinekhiwal.com";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: "Dhan Kuber - Live Results & Charts",
+    default: "Dhan Kuber — Live Satta Result & Monthly Charts",
     template: "%s | Dhan Kuber",
   },
-  description: "Get the latest Dhan Kuber results, charts, and live updates for Gali, Desawar, Faridabad, Ghaziabad and more markets.",
-  keywords: ["Dhan Kuber", "Satta Result", "Gali", "Desawar", "Faridabad", "Ghaziabad", "Satta Chart", "Live Result"],
-  authors: [{ name: "Dhan Kuber" }],
-  creator: "Dhan Kuber",
-  publisher: "Dhan Kuber",
-  robots: "index, follow",
+  description:
+    "Dhan Kuber live results and monthly record charts for Gali, Desawar, Faridabad, Ghaziabad and all regional markets. Updated daily with full历史 archive.",
+  alternates: { canonical: "/" },
+  robots: { index: true, follow: true },
   openGraph: {
     type: "website",
     locale: "en_IN",
-    url: "https://sattaking.example.com",
+    url: SITE_URL,
     siteName: "Dhan Kuber",
-    title: "Dhan Kuber - Live Results & Charts",
-    description: "Get the latest Dhan Kuber results, charts, and live updates for all major markets.",
-    images: [
-      {
-        url: "/og-image.jpg",
-        width: 1200,
-        height: 630,
-        alt: "Dhan Kuber Results",
-      },
-    ],
+    title: "Dhan Kuber — Live Satta Result & Monthly Charts",
+    description: "Daily results and monthly charts for Gali, Desawar, Faridabad, Ghaziabad and more.",
+    images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "Dhan Kuber Results" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Dhan Kuber - Live Results & Charts",
-    description: "Get the latest Dhan Kuber results and charts.",
+    title: "Dhan Kuber — Live Satta Result & Monthly Charts",
+    description: "Daily results and monthly charts.",
     images: ["/og-image.jpg"],
-  },
-  verification: {
-    google: "google-site-verification-code",
   },
 };
 
@@ -5147,11 +5715,13 @@ import { MonthlyChartTable } from "@/components/home/MonthlyChartTable";
 import { FloatingButtons } from "@/components/home/FloatingButtons";
 import { Footer } from "@/components/layout/Footer";
 import {
-  DEFAULT_MARKETS, MAJOR_SLUGS, MONTH_NAMES, MONTH_SHORT, MISSING_MARK, UPCOMING_MARK,
+  DEFAULT_MARKETS, MONTH_NAMES, MONTH_SHORT, MISSING_MARK, UPCOMING_MARK, MIN_YEAR,
   addDays, autoResult, buildMonthlyRows, dateKey, drawSection, firstEntryDates, fmtTimeLabel,
-  fetchChartsResilient, getCachedCharts, getDrawTime, istNow, istToday, longDate, minutesOf,
-  ordinal, slugify, taglineYears, weekdayOf, DrawSection,
+  fetchChartsResilient, getCachedCharts, getCachedHidden, getDrawTime, istNow, istToday,
+  longDate, minutesOf, ordinal, slugify, taglineYears, weekdayOf, DrawSection,
 } from "@/lib/markets";
+
+/* ---------------------------------- types --------------------------------- */
 
 interface ApiChart {
   id: string;
@@ -5164,6 +5734,7 @@ interface ApiChart {
   isActive: boolean;
   drawTime?: string | null;
   displayOrder?: number;
+  updatedAt?: string;
 }
 
 type RowState = LiveRow & {
@@ -5177,19 +5748,31 @@ type RowState = LiveRow & {
   section: DrawSection;
 };
 
+/* -------------------------------- constants ------------------------------- */
+
+/** PERMANENT special 4 — monthly chart columns, reference order. No dynamic selection. */
 const MONTHLY_COLUMNS = [
+  { key: "desawar", label: "DSWR" },
   { key: "faridabad", label: "FRBD" },
   { key: "ghaziabad", label: "GZBD" },
+  { key: "gali", label: "GALI" },
 ];
 
+const SPECIAL_NAMES = "Gali, Desawar, Ghaziabad and Faridabad";
+
+/* --------------------------------- helpers -------------------------------- */
+
+/** Read ?month=&year= from the address bar. */
 function readSelFromUrl(): { month: number; year: number } | null {
   if (typeof window === "undefined") return null;
   const p = new URLSearchParams(window.location.search);
   const m = parseInt(p.get("month") || "", 10);
   const y = parseInt(p.get("year") || "", 10);
-  if (m >= 1 && m <= 12 && y >= 2012 && y <= 2100) return { month: m, year: y };
+  if (m >= 1 && m <= 12 && y >= MIN_YEAR && y <= 2100) return { month: m, year: y };
   return null;
 }
+
+/* ---------------------------------- page ---------------------------------- */
 
 export default function HomePage() {
   /* ------------------------------ live IST clock ---------------------------- */
@@ -5210,8 +5793,11 @@ export default function HomePage() {
   const [todayCharts, setTodayCharts] = useState<ApiChart[]>([]);
   const [yesterdayCharts, setYesterdayCharts] = useState<ApiChart[]>([]);
   const [allCharts, setAllCharts] = useState<ApiChart[]>([]);
+  const [hiddenAll, setHiddenAll] = useState<string[]>([]);
+  const [hiddenMonth, setHiddenMonth] = useState<string[]>([]);
   const [booted, setBooted] = useState(false);
 
+  // Inject localStorage cache BEFORE first paint so rows never flash/disappear.
   useLayoutEffect(() => {
     const t = getCachedCharts(todayKey);
     if (t.length) setTodayCharts(t as ApiChart[]);
@@ -5219,6 +5805,7 @@ export default function HomePage() {
     if (y.length) setYesterdayCharts(y as ApiChart[]);
     const a = getCachedCharts("all-markets");
     if (a.length) setAllCharts(a as ApiChart[]);
+    setHiddenAll(getCachedHidden("all-markets"));
     setBooted(true);
   }, [todayKey, yesterdayKey]);
 
@@ -5243,7 +5830,9 @@ export default function HomePage() {
     let alive = true;
     const loadAll = async () => {
       const d = await fetchChartsResilient(`/api/charts`, "all-markets");
-      if (alive && d) setAllCharts(d as ApiChart[]);
+      if (!alive) return;
+      if (d) setAllCharts(d as ApiChart[]);
+      setHiddenAll(getCachedHidden("all-markets"));
     };
     loadAll();
     const ref = setInterval(loadAll, 60000);
@@ -5267,31 +5856,37 @@ export default function HomePage() {
       }
       return bySlug.get(slug)!;
     };
+
     const absorb = (r: RowState, c: ApiChart) => {
       r.hasDb = true;
       if (c.isHighlighted) r.dbHighlight = true;
       r.dbTime = r.dbTime || c.drawTime;
     };
 
+    // Yesterday first (fallback time)…
     for (const c of yesterdayCharts) {
       const r = ensure(c.chartName);
       r.dbYesterday = c.result;
       absorb(r, c);
     }
+    // …then TODAY: its admin-set draw time ALWAYS wins ("" = use default schedule).
     for (const c of todayCharts) {
       const r = ensure(c.chartName);
       r.dbToday = c.result;
+      r.dbTime = c.drawTime || null;
       absorb(r, c);
     }
     for (const m of DEFAULT_MARKETS) ensure(m);
 
-    // Include every existing market (latest entry for name / draw-time / highlight).
+    // Latest active entry per market (name / draw-time / highlight).
     const meta = new Map<string, { name: string; drawTime?: string | null; highlighted: boolean; key: number }>();
     for (const c of allCharts) {
       const s = slugify(c.chartName);
       const k = dateKey(c.year, c.month, c.date);
       const prev = meta.get(s);
-      if (!prev || k >= prev.key) meta.set(s, { name: c.chartName, drawTime: c.drawTime, highlighted: c.isHighlighted, key: k });
+      if (!prev || k >= prev.key) {
+        meta.set(s, { name: c.chartName, drawTime: c.drawTime, highlighted: c.isHighlighted, key: k });
+      }
     }
     for (const mm of Array.from(meta.values())) {
       const r = ensure(mm.name);
@@ -5300,7 +5895,10 @@ export default function HomePage() {
     }
 
     const yKey = dateKey(yesterday.year, yesterday.month, yesterday.day);
-    const list = Array.from(bySlug.values());
+    // Markets whose entries are ALL inactive are removed entirely.
+    const hiddenSet = new Set(hiddenAll);
+    const list = Array.from(bySlug.values()).filter((r) => !hiddenSet.has(r.slug));
+
     for (const r of list) {
       if (r.hasDb) r.highlighted = r.dbHighlight;
       const time = getDrawTime(r.slug, r.dbTime);
@@ -5311,7 +5909,7 @@ export default function HomePage() {
 
       // TODAY: hidden until the draw time. After → admin value, else "--". NEVER auto.
       r.today = r.passed ? (r.dbToday || MISSING_MARK) : UPCOMING_MARK;
-      // YESTERDAY: admin value, else auto ONLY if before the market's generation, else "--".
+      // YESTERDAY: admin value, else auto ONLY before the market's generation, else "--".
       const gen = firstEntryBySlug.get(r.slug);
       if (r.dbYesterday) r.yesterday = r.dbYesterday;
       else if (gen !== undefined && yKey < gen) r.yesterday = autoResult(r.slug, yesterday.day, yesterday.month, yesterday.year);
@@ -5328,7 +5926,7 @@ export default function HomePage() {
       { label: "REST", rows: rest },
     ].filter((s) => s.label === "LIVE" || s.rows.length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayCharts, yesterdayCharts, allCharts, firstEntryBySlug, minuteKey]);
+  }, [todayCharts, yesterdayCharts, allCharts, firstEntryBySlug, minuteKey, hiddenAll]);
 
   /* ------------------ monthly chart: month/year live in URL ----------------- */
   const [sel, setSel] = useState<{ month: number; year: number } | null>(null);
@@ -5343,19 +5941,23 @@ export default function HomePage() {
     if (!sel) return;
     let alive = true;
     const key = `m-${sel.year}-${sel.month}`;
-    setMonthCharts(getCachedCharts(key) as ApiChart[]);
+    setMonthCharts(getCachedCharts(key) as ApiChart[]); // instant from cache
+    setHiddenMonth(getCachedHidden(key));
     fetchChartsResilient(`/api/charts?year=${sel.year}&month=${sel.month}`, key).then((d) => {
-      if (alive && d) setMonthCharts(d as ApiChart[]);
+      if (!alive) return;
+      if (d) setMonthCharts(d as ApiChart[]);
+      setHiddenMonth(getCachedHidden(key));
     });
     return () => { alive = false; };
   }, [sel]);
 
   const monthlyRows = useMemo(
-    () => (sel ? buildMonthlyRows(MONTHLY_COLUMNS, sel, monthCharts, today, nowMinutes, firstEntryBySlug) : []),
+    () => (sel ? buildMonthlyRows(MONTHLY_COLUMNS, sel, monthCharts, today, nowMinutes, firstEntryBySlug, hiddenMonth) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sel, monthCharts, firstEntryBySlug, minuteKey, today.day]
+    [sel, monthCharts, firstEntryBySlug, minuteKey, today.day, hiddenMonth]
   );
 
+  /** Full page navigation (reload) to the requested month. */
   const navigateMonth = (m: number, y: number) => {
     window.location.assign(`/?ResultFor=${MONTH_NAMES[m - 1]}-${y}&month=${m}&year=${y}#mix-chart`);
   };
@@ -5365,15 +5967,19 @@ export default function HomePage() {
   const prevDate = new Date(selYear, selMonth - 2, 1);
   const nextDate = new Date(selYear, selMonth, 1);
   const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-  const tagline = `Daily Superfast Dhan Kuber Result of ${ordinal(today.day)} ${MONTH_NAMES[today.month - 1]} ${today.year} And Leak Numbers for Ghaziabad and Faridabad With Complete Old Dhan Kuber Chart of ${taglineYears().join(", ")} From Dhan Kuber, Dhan Kuber Ghaziabad, Dhan Kuber Faridabad.`;
 
+  const tagline = `Daily Superfast Dhan Kuber Result of ${ordinal(today.day)} ${MONTH_NAMES[today.month - 1]} ${today.year} And Leak Numbers for ${SPECIAL_NAMES} With Complete Old Dhan Kuber Chart of ${taglineYears().join(", ")} From Dhan Kuber, Dhan Kuber Gali, Dhan Kuber Desawar, Dhan Kuber Ghaziabad, Dhan Kuber Faridabad.`;
+
+  /* --------------------------------- render -------------------------------- */
   return (
     <div className="flex min-h-screen flex-col bg-[#ececec]">
       <SiteHeader tagline={tagline} />
+
       <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 pb-16">
         <p suppressHydrationWarning className="mt-4 text-center text-sm text-[#16a34a]">
           Updated: {MONTH_NAMES[now.getMonth()]} {now.getDate()}, {now.getFullYear()}, {clock} IST.
         </p>
+
         <div className="mt-6 space-y-6">
           <LiveResultsTable
             banner={`Dhan Kuber Results of ${longDate(today)} & ${longDate(yesterday)}`}
@@ -5382,22 +5988,24 @@ export default function HomePage() {
             sections={booted ? sections : []}
             showFooter
           />
+
           <div className="bg-[#1565d8] px-4 py-3 text-center text-sm text-white sm:text-base">
             <span className="mr-1 font-bold text-[#ff8a80]">New:</span>
             Show your game at its original position of the next day
           </div>
+
           <div id="mix-chart">
-              <MonthlyChartTable
-              title={`Monthly Dhan Kuber Result Chart of ${MONTH_NAMES[selMonth - 1]} ${selYear} for Ghaziabad and Faridabad`}
+            <MonthlyChartTable
+              title={`Monthly Dhan Kuber Result Chart of ${MONTH_NAMES[selMonth - 1]} ${selYear} for ${SPECIAL_NAMES}`}
               columns={MONTHLY_COLUMNS}
               rows={monthlyRows}
               prevLabel={`${MONTH_SHORT[prevDate.getMonth()]} ${prevDate.getFullYear()}`}
               nextLabel={`${MONTH_SHORT[nextDate.getMonth()]} ${nextDate.getFullYear()}`}
               onPrev={() => navigateMonth(prevDate.getMonth() + 1, prevDate.getFullYear())}
               onNext={() => navigateMonth(nextDate.getMonth() + 1, nextDate.getFullYear())}
-              latestLabel={`Click here to view the latest chart for Ghaziabad and Faridabad for ${MONTH_NAMES[today.month - 1]}-${today.year}`}
+              latestLabel={`Click here to view the latest chart for ${SPECIAL_NAMES} for ${MONTH_NAMES[today.month - 1]}-${today.year}`}
               onLatest={() => navigateMonth(today.month, today.year)}
-              selectorLabel="Select a month and year to view the combined chart for Ghaziabad and Faridabad."
+              selectorLabel={`Select a month and year to view the combined chart for ${SPECIAL_NAMES}.`}
               selectedMonth={selMonth}
               selectedYear={selYear}
               onGo={(m, y) => navigateMonth(m, y)}
@@ -5405,6 +6013,7 @@ export default function HomePage() {
           </div>
         </div>
       </main>
+
       <Footer />
       <FloatingButtons />
     </div>
@@ -5494,6 +6103,57 @@ export default function PrivacyPage() {
 }
 
 ============================================================
+FILE: src\app\robots.ts
+============================================================
+
+import type { MetadataRoute } from "next";
+
+const BASE = process.env.NEXT_PUBLIC_APP_URL || "https://onlinekhiwal.com";
+
+export default function robots(): MetadataRoute.Robots {
+  return {
+    rules: [{ userAgent: "*", allow: "/", disallow: ["/admin/", "/api/"] }],
+    sitemap: `${BASE}/sitemap.xml`,
+    host: BASE,
+  };
+}
+
+============================================================
+FILE: src\app\sitemap.ts
+============================================================
+
+import type { MetadataRoute } from "next";
+import connectDB from "@/lib/mongodb";
+import Chart from "@/models/Chart";
+import { slugify } from "@/lib/markets";
+
+const BASE = process.env.NEXT_PUBLIC_APP_URL || "https://onlinekhiwal.com";
+export const revalidate = 3600;
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const statics: MetadataRoute.Sitemap = ["", "/contact-form", "/terms", "/privacy", "/disclaimer"].map((p) => ({
+    url: `${BASE}${p}`,
+    lastModified: new Date(),
+    changeFrequency: "daily",
+    priority: p === "" ? 1 : 0.4,
+  }));
+
+  try {
+    await connectDB();
+    const names = (await Chart.distinct("chartName")) as string[];
+    const markets: MetadataRoute.Sitemap = names.map((n) => ({
+      url: `${BASE}/${slugify(n)}/satta-result-chart/`,
+      lastModified: new Date(),
+      changeFrequency: "daily",
+      priority: 0.8,
+    }));
+    return [...statics, ...markets];
+  } catch {
+    return statics;
+  }
+}
+
+============================================================
 FILE: src\app\terms\page.tsx
 ============================================================
 
@@ -5525,7 +6185,7 @@ export default function TermsPage() {
           <div className="prose prose-gray max-w-none space-y-8">
             <section>
               <h2 className="text-xl font-semibold text-gray-900 mb-3">1. AGREEMENT TO TERMS</h2>
-              <p>These Terms of Service ("Terms") constitute a legally binding agreement made between you ("the User") and the owners and operators of Dhan-Kuber.com ("we," "us," or "our"), concerning your access to and use of the Services. By accessing the Services, you agree that you have read, understood, and agree to be bound by these Terms. If you do not agree, you are prohibited from using the Services and must discontinue use immediately.</p>
+              <p>These Terms of Service ("Terms") constitute a legally binding agreement made between you ("the User") and the owners and operators of onlinekhiwal.com ("we," "us," or "our"), concerning your access to and use of the Services. By accessing the Services, you agree that you have read, understood, and agree to be bound by these Terms. If you do not agree, you are prohibited from using the Services and must discontinue use immediately.</p>
             </section>
 
             <section>
@@ -5594,289 +6254,30 @@ export default function TermsPage() {
 FILE: src\app\[market]\satta-result-chart\[[...rest]]\page.tsx
 ============================================================
 
-"use client";
+import type { Metadata } from "next";
+import { MarketChartClient } from "@/components/home/MarketChartClient";
+import { MONTH_NAMES, istNow, istToday, titleFromSlug } from "@/lib/markets";
 
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import { SiteHeader } from "@/components/home/SiteHeader";
-import { LiveResultsTable, LiveRow } from "@/components/home/LiveResultsTable";
-import { MonthlyChartTable } from "@/components/home/MonthlyChartTable";
-import { FloatingButtons } from "@/components/home/FloatingButtons";
-import { Footer } from "@/components/layout/Footer";
-import {
-  MISSING_MARK, UPCOMING_MARK, MONTH_NAMES, MONTH_SHORT, addDays, autoResult,
-  buildMonthlyRows, dateKey, firstEntryDates, fetchChartsResilient, getCachedCharts,
-  fmtTimeLabel, getDrawTime, istNow, istToday, longDate, minutesOf, ordinal, slugify,
-  titleFromSlug, weekdayOf,
-} from "@/lib/markets";
+type Props = { params: { market: string } };
 
-/* ---------------------------------- types --------------------------------- */
-
-interface ApiChart {
-  id: string;
-  chartName: string;
-  result: string;
-  date: number;
-  month: number;
-  year: number;
-  isHighlighted: boolean;
-  isActive: boolean;
-  drawTime?: string | null;
-}
-
-type RowState = LiveRow & {
-  minutes: number;
-  passed: boolean;
-  dbTime?: string | null;
-  dbToday?: string;
-  dbYesterday?: string;
-};
-
-/* --------------------------------- helpers -------------------------------- */
-
-/** Read ?month=&year= from the address bar (same idea as chart.php?month=11&year=2026). */
-function readSelFromUrl(): { month: number; year: number } | null {
-  if (typeof window === "undefined") return null;
-  const p = new URLSearchParams(window.location.search);
-  const m = parseInt(p.get("month") || "", 10);
-  const y = parseInt(p.get("year") || "", 10);
-  if (m >= 1 && m <= 12 && y >= 2012 && y <= 2100) return { month: m, year: y };
-  return null;
-}
-
-/* ---------------------------------- page ---------------------------------- */
-
-export default function MarketChartPage() {
-  const params = useParams();
-  const slug = (params.market as string) || "";
-  const canonical = titleFromSlug(slug);
-
-  /* ------------------------------ live IST clock ---------------------------- */
-  const [now, setNow] = useState(() => istNow());
-  useEffect(() => {
-    const t = setInterval(() => setNow(istNow()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const today = istToday(now);
-  const yesterday = addDays(today, -1);
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  const minuteKey = Math.floor(now.getTime() / 60000);
-  const todayKey = `${today.year}-${today.month}-${today.day}`;
-  const yesterdayKey = `${yesterday.year}-${yesterday.month}-${yesterday.day}`;
-
-  /* --------------------- daily + all charts: cache-first + fetch ------------ */
-  const [todayCharts, setTodayCharts] = useState<ApiChart[]>([]);
-  const [yesterdayCharts, setYesterdayCharts] = useState<ApiChart[]>([]);
-  const [allCharts, setAllCharts] = useState<ApiChart[]>([]);
-  const [booted, setBooted] = useState(false);
-
-  // Inject localStorage cache BEFORE first paint so rows never flash/disappear.
-  useLayoutEffect(() => {
-    const t = getCachedCharts(todayKey);
-    if (t.length) setTodayCharts(t as ApiChart[]);
-    const y = getCachedCharts(yesterdayKey);
-    if (y.length) setYesterdayCharts(y as ApiChart[]);
-    const a = getCachedCharts("all-markets");
-    if (a.length) setAllCharts(a as ApiChart[]);
-    setBooted(true);
-  }, [todayKey, yesterdayKey]);
-
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      const [t, y] = await Promise.all([
-        fetchChartsResilient(`/api/charts?year=${today.year}&month=${today.month}&date=${today.day}`, todayKey),
-        fetchChartsResilient(`/api/charts?year=${yesterday.year}&month=${yesterday.month}&date=${yesterday.day}`, yesterdayKey),
-      ]);
-      if (!alive) return;
-      if (t) setTodayCharts(t as ApiChart[]);
-      if (y) setYesterdayCharts(y as ApiChart[]);
-    };
-    load();
-    const ref = setInterval(load, 60000);
-    return () => { alive = false; clearInterval(ref); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayKey, yesterdayKey]);
-
-  // Every market in the DB → used to compute each market's generation date.
-  useEffect(() => {
-    let alive = true;
-    const loadAll = async () => {
-      const d = await fetchChartsResilient(`/api/charts`, "all-markets");
-      if (alive && d) setAllCharts(d as ApiChart[]);
-    };
-    loadAll();
-    const ref = setInterval(loadAll, 60000);
-    return () => { alive = false; clearInterval(ref); };
-  }, []);
-
-  const firstEntryBySlug = useMemo(() => firstEntryDates(allCharts), [allCharts]);
-
-    /* ------------------------- the market table ----------------------- */
-  const smallSlugs = useMemo(() => {
-  const list = [slug, "faridabad", "ghaziabad"];
-  return Array.from(new Set(list.filter(Boolean)));
-}, [slug]);
-
-  const rows = useMemo(() => {
-    const bySlug = new Map<string, RowState>();
-    const ensure = (name: string): RowState => {
-      const s = slugify(name);
-      if (!bySlug.has(s)) {
-        bySlug.set(s, {
-          slug: s, name, timeLabel: "", yesterday: MISSING_MARK, today: UPCOMING_MARK,
-          highlighted: false, minutes: 0, passed: false,
-        });
-      }
-      return bySlug.get(s)!;
-    };
-
-    for (const c of yesterdayCharts) {
-      if (!smallSlugs.includes(slugify(c.chartName))) continue;
-      const r = ensure(c.chartName);
-      r.dbYesterday = c.result;
-      r.dbTime = r.dbTime || c.drawTime;
-      if (c.isHighlighted) r.highlighted = true;
-    }
-    for (const c of todayCharts) {
-      if (!smallSlugs.includes(slugify(c.chartName))) continue;
-      const r = ensure(c.chartName);
-      r.dbToday = c.result;
-      r.dbTime = r.dbTime || c.drawTime;
-      if (c.isHighlighted) r.highlighted = true;
-    }
-    for (const s of smallSlugs) ensure(s === slug ? canonical : titleFromSlug(s));
-
-    const yKey = dateKey(yesterday.year, yesterday.month, yesterday.day);
-    const out: RowState[] = [];
-    for (const s of smallSlugs) {
-      const r = bySlug.get(s);
-      if (!r) continue;
-      const time = getDrawTime(r.slug, r.dbTime);
-      r.minutes = minutesOf(time);
-      r.timeLabel = fmtTimeLabel(time);
-      r.passed = nowMinutes >= r.minutes;
-      // TODAY: admin value, else "--" once passed, else "XX" (upcoming). Never auto.
-      r.today = r.dbToday ? r.dbToday : r.passed ? MISSING_MARK : UPCOMING_MARK;
-      // YESTERDAY: admin value, else auto ONLY if before generation, else "--".
-      const gen = firstEntryBySlug.get(r.slug);
-      if (r.dbYesterday) r.yesterday = r.dbYesterday;
-      else if (gen !== undefined && yKey < gen) r.yesterday = autoResult(r.slug, yesterday.day, yesterday.month, yesterday.year);
-      else r.yesterday = MISSING_MARK;
-      out.push(r);
-    }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayCharts, yesterdayCharts, firstEntryBySlug, minuteKey, smallSlugs]);
-
-  /* ------------------ monthly chart: month/year live in URL ----------------- */
-  const [sel, setSel] = useState<{ month: number; year: number } | null>(null);
-  useLayoutEffect(() => {
-    const fromUrl = readSelFromUrl();
-    const t = istToday(istNow());
-    setSel(fromUrl || { month: t.month, year: t.year });
-  }, []);
-
-  const [monthCharts, setMonthCharts] = useState<ApiChart[]>([]);
-  useEffect(() => {
-    if (!sel) return;
-    let alive = true;
-    const key = `m-${sel.year}-${sel.month}`;
-    setMonthCharts(getCachedCharts(key) as ApiChart[]); // instant from cache
-    fetchChartsResilient(`/api/charts?year=${sel.year}&month=${sel.month}`, key).then((d) => {
-      if (alive && d) setMonthCharts(d as ApiChart[]);
-    });
-    return () => { alive = false; };
-  }, [sel]);
-
-  const monthlyColumns = useMemo(
-  () => [
-    { key: slug, label: canonical },
-    { key: "faridabad", label: "FRBD" },
-    { key: "ghaziabad", label: "GZBD" },
-  ],
-  [slug, canonical]
-);
-
-  const monthlyRows = useMemo(
-    () => (sel ? buildMonthlyRows(monthlyColumns, sel, monthCharts, today, nowMinutes, firstEntryBySlug) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sel, monthCharts, firstEntryBySlug, minuteKey, monthlyColumns, today.day]
-  );
-
-  /** Full page navigation (reload) to the requested month — same as the reference site. */
-  const navigateMonth = (m: number, y: number) => {
-    window.location.assign(
-      `/${slug}/satta-result-chart/?ResultFor=${MONTH_NAMES[m - 1]}-${y}&month=${m}&year=${y}#mix-chart`
-    );
+/** Unique SEO title/description per market — the whole point of the split. */
+export function generateMetadata({ params }: Props): Metadata {
+  const name = titleFromSlug(params.market);
+  const t = istToday(istNow());
+  const month = MONTH_NAMES[t.month - 1];
+  const title = `${name} Satta Result Chart ${month} ${t.year}`;
+  const description = `${name} daily satta result and monthly record chart for ${month} ${t.year}, with Gali, Desawar, Faridabad and Ghaziabad combined charts on Dhan Kuber.`;
+  const url = `/${params.market}/satta-result-chart/`;
+  return {
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: { title, description, url, type: "article" },
   };
+}
 
-  const selMonth = sel?.month ?? today.month;
-  const selYear = sel?.year ?? today.year;
-  const prevDate = new Date(selYear, selMonth - 2, 1);
-  const nextDate = new Date(selYear, selMonth, 1);
-
-  const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-
-  const tagline = `${canonical} Satta Result And Monthly Satta Chart of ${MONTH_NAMES[today.month - 1]} ${today.year} With Combined Chart of Ghaziabad And Faridabad From Dhan Kuber, Dhan Kuber Result, Dhan Kuber Chart, Black Dhan Kuber and Dhan Kuber 786.`;
-
-  /* --------------------------------- render -------------------------------- */
-  return (
-    <div className="flex min-h-screen flex-col bg-[#ececec]">
-      <SiteHeader tagline={tagline} />
-
-      <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 pb-16">
-        <p suppressHydrationWarning className="mt-4 text-center text-sm text-[#16a34a]">
-          Updated: {MONTH_NAMES[now.getMonth()]} {now.getDate()}, {now.getFullYear()}, {clock} IST.
-        </p>
-
-        <div className="mt-6 space-y-6">
-          <LiveResultsTable
-            banner={`${canonical} Satta Result of ${longDate(today)} & ${longDate(yesterday)}`}
-            col1={`${weekdayOf(yesterday)}. ${ordinal(yesterday.day)}`}
-            col2={`${weekdayOf(today)}. ${ordinal(today.day)}`}
-            rows={booted ? rows : []}
-            showLive={false}
-          />
-
-          <Link
-            href="/"
-            className="block bg-[#3d3d3d] px-4 py-3 text-center text-sm font-medium text-white hover:bg-[#333] sm:text-base"
-          >
-            Click here for all Regional Offline Draw Results.
-          </Link>
-
-          <div className="bg-[#1565d8] px-4 py-3 text-center text-sm text-white sm:text-base">
-            <span className="mr-1 font-bold text-[#ff8a80]">New:</span>
-            Show your game at its original position of the next day
-          </div>
-
-          <div id="mix-chart">
-              <MonthlyChartTable
-              title={`${canonical} Satta Result Chart of ${MONTH_NAMES[selMonth - 1]} ${selYear} with Ghaziabad and Faridabad`}
-              columns={monthlyColumns}
-              rows={monthlyRows}
-              prevLabel={`${MONTH_SHORT[prevDate.getMonth()]} ${prevDate.getFullYear()}`}
-              nextLabel={`${MONTH_SHORT[nextDate.getMonth()]} ${nextDate.getFullYear()}`}
-              onPrev={() => navigateMonth(prevDate.getMonth() + 1, prevDate.getFullYear())}
-              onNext={() => navigateMonth(nextDate.getMonth() + 1, nextDate.getFullYear())}
-              latestLabel={`Click here to view the latest chart for Ghaziabad and Faridabad for ${MONTH_NAMES[today.month - 1]}-${today.year}`}
-              onLatest={() => navigateMonth(today.month, today.year)}
-              selectorLabel={`Select a month and year to view the combined chart for ${canonical}, Ghaziabad and Faridabad.`}
-              selectedMonth={selMonth}
-              selectedYear={selYear}
-              onGo={(m, y) => navigateMonth(m, y)}
-            />
-          </div>
-        </div>
-      </main>
-
-      <Footer />
-      <FloatingButtons />
-    </div>
-  );
+export default function MarketChartPage({ params }: Props) {
+  return <MarketChartClient slug={params.market} />;
 }
 
 ============================================================
@@ -5904,9 +6305,9 @@ export function AdminHeader({ onMenuClick, user, pageTitle, breadcrumbs = [] }: 
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-4">
-            <button
+              <button
               type="button"
-              onClick={onMenuClick}
+              onClick={() => window.dispatchEvent(new CustomEvent("admin-sidebar-toggle"))}
               className="lg:hidden p-2 rounded-lg text-gray-600 hover:bg-gray-100"
               aria-label="Open menu"
             >
@@ -5972,27 +6373,19 @@ FILE: src\components\admin\AdminSidebar.tsx
 
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 import {
-  LayoutDashboard,
-  BarChart2,
-  PlusCircle,
-  Users,
-  Settings,
-  LogOut,
-  ChevronLeft,
-  ChevronRight,
+  LayoutDashboard, BarChart2, PlusCircle, Users, Settings, LogOut,
+  ChevronLeft, ChevronRight, X,
 } from "lucide-react";
 
 interface AdminSidebarProps {
   isCollapsed?: boolean;
   onToggle?: () => void;
-  user?: {
-    username: string;
-    role: string;
-  };
+  user?: { username: string; role: string };
 }
 
 const navItems = [
@@ -6000,92 +6393,136 @@ const navItems = [
   { href: "/admin/charts", label: "Charts", icon: BarChart2 },
   { href: "/admin/charts/add", label: "Add Chart", icon: PlusCircle },
   { href: "/admin/admins", label: "Admins", icon: Users, roles: ["super_admin"] },
-  { href: "/admin/settings", label: "Settings", icon: Settings }, // Removed role restriction
+  { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
+
+/** Custom event fired by the header hamburger (keeps pages untouched). */
+export const SIDEBAR_TOGGLE_EVENT = "admin-sidebar-toggle";
 
 export function AdminSidebar({ isCollapsed = false, onToggle, user }: AdminSidebarProps) {
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-  const filteredItems = navItems.filter((item) => !item.roles || item.roles.includes(user?.role || ""));
+  // Open/close from the header hamburger.
+  useEffect(() => {
+    const toggle = () => setMobileOpen((v) => !v);
+    window.addEventListener(SIDEBAR_TOGGLE_EVENT, toggle);
+    return () => window.removeEventListener(SIDEBAR_TOGGLE_EVENT, toggle);
+  }, []);
+
+  // Auto-close the drawer whenever the route changes.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  const filteredItems = navItems.filter((i) => !i.roles || i.roles.includes(user?.role || ""));
 
   return (
-    <aside
-      className={clsx(
-        "admin-sidebar bg-white border-r border-gray-200 flex flex-col transition-all duration-300",
-        isCollapsed ? "w-16" : "w-64"
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
       )}
-      aria-label="Admin navigation"
-    >
-      <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
-        <Link href="/admin/dashboard" className="flex items-center gap-2" aria-label="Admin Dashboard">
-          <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-lg">SK</span>
-          </div>
-          {!isCollapsed && <span className="font-bold text-xl text-gray-900">Admin Panel</span>}
-        </Link>
-        {onToggle && (
-          <button
-            onClick={onToggle}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-expanded={!isCollapsed}
-          >
-            {isCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-          </button>
+
+      <aside
+        data-collapsed={isCollapsed ? "true" : "false"}
+        className={clsx(
+          "admin-sidebar bg-white border-r border-gray-200 flex flex-col transition-all duration-300 w-64",
+          isCollapsed ? "lg:w-16" : "lg:w-64",
+          mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
-      </div>
-
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto" role="navigation" aria-label="Main admin menu">
-        {filteredItems.map((item) => {
-          const isActive = pathname === item.href || (item.href !== "/admin/dashboard" && pathname.startsWith(item.href));
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={clsx(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-                isActive
-                  ? "bg-primary-50 text-primary-700"
-                  : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
-                isCollapsed && "justify-center"
-              )}
-              aria-current={isActive ? "page" : undefined}
-              title={isCollapsed ? item.label : undefined}
-            >
-              <item.icon className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
-              {!isCollapsed && <span>{item.label}</span>}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className="p-4 border-t border-gray-200">
-        <div className={clsx("flex items-center gap-3", isCollapsed && "justify-center")}>
-          <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
-            <span className="text-primary-700 font-medium text-sm">
-              {user?.username?.charAt(0).toUpperCase() || "A"}
-            </span>
-          </div>
-          {!isCollapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">{user?.username}</p>
-              <p className="text-xs text-gray-500 capitalize">{user?.role?.replace("_", " ")}</p>
+        aria-label="Admin navigation"
+      >
+        {/* header */}
+        <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
+          <Link href="/admin/dashboard" className="flex items-center gap-2 min-w-0" aria-label="Admin Dashboard">
+            <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0">
+              <span className="text-white font-bold text-lg">OK</span>
             </div>
+            {!isCollapsed && <span className="font-bold text-xl text-gray-900 truncate">Admin Panel</span>}
+          </Link>
+
+          {/* mobile: close drawer */}
+          <button
+            type="button"
+            onClick={() => setMobileOpen(false)}
+            className="lg:hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+            aria-label="Close menu"
+          >
+            <X className="w-5 h-5" />
+          </button>
+
+          {/* desktop: collapse rail */}
+          {onToggle && (
+            <button
+              type="button"
+              onClick={onToggle}
+              className="hidden lg:flex p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+              aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!isCollapsed}
+            >
+              {isCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
+            </button>
           )}
         </div>
-        {!isCollapsed && (
-          <form action="/admin/logout" method="POST" className="mt-4">
-            <button
-              type="submit"
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-danger-600 hover:bg-danger-50 rounded-lg transition-colors"
-            >
-              <LogOut className="w-5 h-5" aria-hidden="true" />
-              <span>Sign Out</span>
-            </button>
-          </form>
-        )}
-      </div>
-    </aside>
+
+        {/* nav */}
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto" aria-label="Main admin menu">
+          {filteredItems.map((item) => {
+            const isActive = pathname === item.href || (item.href !== "/admin/dashboard" && pathname.startsWith(item.href));
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+                className={clsx(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                  isActive ? "bg-primary-50 text-primary-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+                  isCollapsed && "lg:justify-center"
+                )}
+                aria-current={isActive ? "page" : undefined}
+                title={isCollapsed ? item.label : undefined}
+              >
+                <item.icon className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
+                {!isCollapsed && <span>{item.label}</span>}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* footer */}
+        <div className="p-4 border-t border-gray-200">
+          <div className={clsx("flex items-center gap-3", isCollapsed && "lg:justify-center")}>
+            <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
+              <span className="text-primary-700 font-medium text-sm">
+                {user?.username?.charAt(0).toUpperCase() || "A"}
+              </span>
+            </div>
+            {!isCollapsed && (
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">{user?.username}</p>
+                <p className="text-xs text-gray-500 capitalize">{user?.role?.replace("_", " ")}</p>
+              </div>
+            )}
+          </div>
+          {!isCollapsed && (
+            <form action="/admin/logout" method="POST" className="mt-4">
+              <button
+                type="submit"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-danger-600 hover:bg-danger-50 rounded-lg transition-colors"
+              >
+                <LogOut className="w-5 h-5" aria-hidden="true" />
+                <span>Sign Out</span>
+              </button>
+            </form>
+          )}
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -6102,6 +6539,7 @@ import { Select } from "@/components/shared/Select";
 import { DrawTimePicker } from "@/components/admin/DrawTimePicker";
 import { Tag, Hash, CalendarClock, Eye, Star, CalendarDays } from "lucide-react";
 import { fmtTimeLabel, getDrawTime, slugify } from "@/lib/markets";
+import { SPECIAL_MARKETS, marketKey } from "@/lib/markets";
 
 interface ChartFormData {
   chartName: string;
@@ -6215,17 +6653,21 @@ export function ChartForm({
         if (!value || (value as string).trim().length === 0) return "Chart name is required";
         if ((value as string).length > 100) return "Chart name too long";
         break;
-      case "result":
-        if (!value || (value as string).trim().length === 0) return "Result is required";
+        case "result":
+        // Blank is valid: saves a "pending" table; the number can be added later.
         if ((value as string).length > 20) return "Result too long";
         break;
-      case "date":
+            case "date": {
         if (typeof value === "number" && formData.month && formData.year) {
           const selectedDate = new Date(formData.year, formData.month - 1, value);
           if (selectedDate > today) return "Future dates not allowed";
+          const isSpecial = SPECIAL_MARKETS.some((n) => marketKey(n) === marketKey(formData.chartName || ""));
+          if (selectedDate < today && !isSpecial)
+            return "Past dates can only be added for Gali, Desawar, Faridabad, Ghaziabad";
         }
         if (typeof value === "number" && (value < 1 || value > 31)) return "Invalid date";
         break;
+      }
       case "month":
         if (typeof value === "number" && (value < 1 || value > 12)) return "Invalid month";
         break;
@@ -6301,9 +6743,12 @@ export function ChartForm({
             <p className="truncate text-lg font-medium uppercase text-gray-900">
               {formData.chartName || "Market Name"}
             </p>
-            <p className="mt-0.5 text-xs text-gray-700">
+             <p className="mt-0.5 text-xs text-gray-700">
               at {previewTime}
               <span className="ml-2 text-sm text-blue-600">Record Chart</span>
+              {!formData.result.trim() && (
+                <span className="badge badge-warning ml-2">Result pending</span>
+              )}
             </p>
           </div>
           <div className="font-mono text-3xl font-bold text-gray-900">{formData.result || "--"}</div>
@@ -6353,9 +6798,9 @@ export function ChartForm({
             )}
           </div>
 
-          <div>
+                   <div>
             <label htmlFor="result" className="label">
-              Result <span className="text-danger-500">*</span>
+              Result <span className="text-xs font-normal text-gray-500">(optional now)</span>
             </label>
             <div className="relative">
               <Hash className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
@@ -6368,16 +6813,19 @@ export function ChartForm({
                   "input pl-9 font-mono text-lg",
                   errors.result && "border-danger-500 focus:border-danger-500 focus:ring-danger-500/20"
                 )}
-                placeholder="e.g., 45"
+                placeholder="Leave blank to pre-create · e.g., 45"
                 maxLength={20}
-                required
               />
             </div>
-            {errors.result && (
+            {errors.result ? (
               <p className="mt-1.5 text-sm text-danger-600" role="alert">{errors.result}</p>
+            ) : (
+              <p className="mt-1.5 text-xs text-gray-500">
+                Save with a blank result to schedule the table now, then add the number 2–5 minutes before its draw time.
+              </p>
             )}
           </div>
-
+         
           <div>
             <label htmlFor="displayOrder" className="label">Display Order</label>
             <input
@@ -6550,6 +6998,7 @@ import { Edit, Trash2, Eye, Star, Replace } from "lucide-react";
 import { Button } from "@/components/shared/Button";
 import { Input } from "@/components/shared/Input";
 import { Modal, ConfirmModal } from "@/components/shared/Modal";
+import { fmtTimeLabel } from "@/lib/markets";
 
 /* ---------------------------------- types --------------------------------- */
 
@@ -6568,6 +7017,7 @@ interface ChartData {
   createdAt: Date;
   updatedAt: Date;
   stale?: boolean;
+  drawTime?: string | null;
 }
 
 interface Pagination {
@@ -6734,10 +7184,15 @@ export function ChartTable({
                 >
                   <td className="font-medium text-gray-900">
                     {chart.chartName}
+                    {chart.drawTime && (
+                      <span className="badge badge-primary ml-2">{fmtTimeLabel(chart.drawTime)}</span>
+                    )}
                     {chart.stale && <span className="badge badge-warning ml-2">Needs update</span>}
                   </td>
                   <td className="whitespace-nowrap text-gray-600">{chart.formattedDate}</td>
-                  <td className="font-mono text-lg font-bold text-primary-700">{chart.result}</td>
+                     <td className="font-mono text-lg font-bold text-primary-700">
+                    {chart.result ? chart.result : <span className="badge badge-warning">Pending</span>}
+                  </td>
                   <td className="text-gray-600">{chart.displayOrder}</td>
                   <td className="whitespace-nowrap text-sm text-gray-500">
                     {chart.scheduledAt ? new Date(chart.scheduledAt).toLocaleString() : "Immediate"}
@@ -7909,6 +8364,405 @@ function FragmentSection({ section }: { section: LiveSection }) {
 }
 
 ============================================================
+FILE: src\components\home\MarketChartClient.tsx
+============================================================
+
+"use client";
+
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { SiteHeader } from "@/components/home/SiteHeader";
+import { LiveResultsTable, LiveRow, LiveSection } from "@/components/home/LiveResultsTable";
+import { MonthlyChartTable } from "@/components/home/MonthlyChartTable";
+import { FloatingButtons } from "@/components/home/FloatingButtons";
+import { Footer } from "@/components/layout/Footer";
+import {
+  DEFAULT_MARKETS, MISSING_MARK, UPCOMING_MARK, MONTH_NAMES, MONTH_SHORT, MIN_YEAR,
+  addDays, autoResult, buildMonthlyRows, dateKey, drawSection, firstEntryDates,
+  fetchChartsResilient, getCachedCharts, getCachedHidden, fmtTimeLabel, getDrawTime,
+  istNow, istToday, longDate, minutesOf, ordinal, slugify, titleFromSlug, weekdayOf, DrawSection,
+} from "@/lib/markets";
+
+/* ---------------------------------- types --------------------------------- */
+
+interface ApiChart {
+  id: string;
+  chartName: string;
+  result: string;
+  date: number;
+  month: number;
+  year: number;
+  isHighlighted: boolean;
+  isActive: boolean;
+  drawTime?: string | null;
+}
+
+type RowState = LiveRow & {
+  minutes: number;
+  passed: boolean;
+  dbTime?: string | null;
+  dbToday?: string;
+  dbYesterday?: string;
+  hasDb: boolean;
+  dbHighlight: boolean;
+  section: DrawSection;
+};
+
+/** The 4 permanent companion tables (local — no extra markets.ts export needed). */
+const SPECIAL_SLUGS = ["desawar", "faridabad", "ghaziabad", "gali"];
+
+/* --------------------------------- helpers -------------------------------- */
+
+function readSelFromUrl(): { month: number; year: number } | null {
+  if (typeof window === "undefined") return null;
+  const p = new URLSearchParams(window.location.search);
+  const m = parseInt(p.get("month") || "", 10);
+  const y = parseInt(p.get("year") || "", 10);
+  if (m >= 1 && m <= 12 && y >= MIN_YEAR && y <= 2100) return { month: m, year: y };
+  return null;
+}
+
+/* -------------------------------- component ------------------------------- */
+
+export function MarketChartClient({ slug }: { slug: string }) {
+  const canonical = titleFromSlug(slug);
+
+  /* ------------------------------ live IST clock ---------------------------- */
+  const [now, setNow] = useState(() => istNow());
+  useEffect(() => {
+    const t = setInterval(() => setNow(istNow()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const today = istToday(now);
+  const yesterday = addDays(today, -1);
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const minuteKey = Math.floor(now.getTime() / 60000);
+  const todayKey = `${today.year}-${today.month}-${today.day}`;
+  const yesterdayKey = `${yesterday.year}-${yesterday.month}-${yesterday.day}`;
+
+  /* --------------------- daily + all charts: cache-first + fetch ------------ */
+  const [todayCharts, setTodayCharts] = useState<ApiChart[]>([]);
+  const [yesterdayCharts, setYesterdayCharts] = useState<ApiChart[]>([]);
+  const [allCharts, setAllCharts] = useState<ApiChart[]>([]);
+  const [hiddenAll, setHiddenAll] = useState<string[]>([]);
+  const [hiddenMonth, setHiddenMonth] = useState<string[]>([]);
+  const [booted, setBooted] = useState(false);
+
+  useLayoutEffect(() => {
+    const t = getCachedCharts(todayKey);
+    if (t.length) setTodayCharts(t as ApiChart[]);
+    const y = getCachedCharts(yesterdayKey);
+    if (y.length) setYesterdayCharts(y as ApiChart[]);
+    const a = getCachedCharts("all-markets");
+    if (a.length) setAllCharts(a as ApiChart[]);
+    setHiddenAll(getCachedHidden("all-markets"));
+    setBooted(true);
+  }, [todayKey, yesterdayKey]);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const [t, y] = await Promise.all([
+        fetchChartsResilient(`/api/charts?year=${today.year}&month=${today.month}&date=${today.day}`, todayKey),
+        fetchChartsResilient(`/api/charts?year=${yesterday.year}&month=${yesterday.month}&date=${yesterday.day}`, yesterdayKey),
+      ]);
+      if (!alive) return;
+      if (t) setTodayCharts(t as ApiChart[]);
+      if (y) setYesterdayCharts(y as ApiChart[]);
+    };
+    load();
+    const ref = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(ref); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayKey, yesterdayKey]);
+
+  useEffect(() => {
+    let alive = true;
+    const loadAll = async () => {
+      const d = await fetchChartsResilient(`/api/charts`, "all-markets");
+      if (!alive) return;
+      if (d) setAllCharts(d as ApiChart[]);
+      setHiddenAll(getCachedHidden("all-markets"));
+    };
+    loadAll();
+    const ref = setInterval(loadAll, 60000);
+    return () => { alive = false; clearInterval(ref); };
+  }, []);
+
+  const firstEntryBySlug = useMemo(() => firstEntryDates(allCharts), [allCharts]);
+
+  /* --------- extra entry: the market that declared its result most recently -- */
+  const recentSlug = useMemo<string | null>(() => {
+    const exclude = new Set([slug, ...SPECIAL_SLUGS, ...hiddenAll]);
+    let bestSlug: string | null = null;
+    let bestRank = -1;
+    const consider = (c: ApiChart, dayOffset: number) => {
+      const s = slugify(c.chartName);
+      if (exclude.has(s)) return;
+      if (!c.result || !c.result.trim()) return;
+      const mins = minutesOf(getDrawTime(s, c.drawTime));
+      if (dayOffset === 1 && nowMinutes < mins) return; // today: only already-declared
+      const rank = dayOffset * 1440 + mins;
+      if (rank > bestRank) { bestRank = rank; bestSlug = s; }
+    };
+    for (const c of todayCharts) consider(c, 1);
+    for (const c of yesterdayCharts) consider(c, 0);
+    return bestSlug;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayCharts, yesterdayCharts, slug, minuteKey, hiddenAll]);
+
+  /* ------------------- the companion table (6 rows) ------------------------- */
+  const smallSlugs = useMemo(() => {
+    const hiddenSet = new Set(hiddenAll);
+    const list = [slug, ...SPECIAL_SLUGS, ...(recentSlug ? [recentSlug] : [])]
+      .filter((s): s is string => Boolean(s) && !hiddenSet.has(s));
+    return Array.from(new Set(list));
+  }, [slug, recentSlug, hiddenAll]);
+
+  const rows = useMemo(() => {
+    const bySlug = new Map<string, RowState>();
+    const ensure = (name: string): RowState => {
+      const s = slugify(name);
+      if (!bySlug.has(s)) {
+        bySlug.set(s, {
+          slug: s, name, timeLabel: "", yesterday: MISSING_MARK, today: UPCOMING_MARK,
+          highlighted: false, minutes: 0, passed: false, hasDb: false, dbHighlight: false, section: "REST",
+        });
+      }
+      return bySlug.get(s)!;
+    };
+
+    for (const c of yesterdayCharts) {
+      if (!smallSlugs.includes(slugify(c.chartName))) continue;
+      const r = ensure(c.chartName);
+      r.dbYesterday = c.result;
+      r.dbTime = r.dbTime || c.drawTime;
+      if (c.isHighlighted) r.highlighted = true;
+    }
+    for (const c of todayCharts) {
+      if (!smallSlugs.includes(slugify(c.chartName))) continue;
+      const r = ensure(c.chartName);
+      r.dbToday = c.result;
+      r.dbTime = c.drawTime || null; // today's admin time wins
+      if (c.isHighlighted) r.highlighted = true;
+    }
+    for (const s of smallSlugs) ensure(s === slug ? canonical : titleFromSlug(s));
+
+    const yKey = dateKey(yesterday.year, yesterday.month, yesterday.day);
+    const out: RowState[] = [];
+    for (const s of smallSlugs) {
+      const r = bySlug.get(s);
+      if (!r) continue;
+      const time = getDrawTime(r.slug, r.dbTime);
+      r.minutes = minutesOf(time);
+      r.timeLabel = fmtTimeLabel(time);
+      r.passed = nowMinutes >= r.minutes;
+      r.today = r.dbToday ? r.dbToday : r.passed ? MISSING_MARK : UPCOMING_MARK;
+      const gen = firstEntryBySlug.get(r.slug);
+      if (r.dbYesterday) r.yesterday = r.dbYesterday;
+      else if (gen !== undefined && yKey < gen) r.yesterday = autoResult(r.slug, yesterday.day, yesterday.month, yesterday.year);
+      else r.yesterday = MISSING_MARK;
+      out.push(r);
+    }
+    out.sort((a, b) => a.minutes - b.minutes); // chronological, like the reference
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayCharts, yesterdayCharts, firstEntryBySlug, minuteKey, smallSlugs]);
+
+  /* ------------- the FULL daily table (all markets) shown below ------------- */
+  const sections = useMemo<LiveSection[]>(() => {
+    const bySlug = new Map<string, RowState>();
+    const ensure = (name: string): RowState => {
+      const s = slugify(name);
+      if (!bySlug.has(s)) {
+        bySlug.set(s, {
+          slug: s, name, timeLabel: "", yesterday: MISSING_MARK, today: UPCOMING_MARK,
+          highlighted: false, minutes: 0, passed: false, hasDb: false, dbHighlight: false, section: "REST",
+        });
+      }
+      return bySlug.get(s)!;
+    };
+    const absorb = (r: RowState, c: ApiChart) => {
+      r.hasDb = true;
+      if (c.isHighlighted) r.dbHighlight = true;
+      r.dbTime = r.dbTime || c.drawTime;
+    };
+
+    for (const c of yesterdayCharts) { const r = ensure(c.chartName); r.dbYesterday = c.result; absorb(r, c); }
+    for (const c of todayCharts) { const r = ensure(c.chartName); r.dbToday = c.result; r.dbTime = c.drawTime || null; absorb(r, c); }
+    for (const m of DEFAULT_MARKETS) ensure(m);
+
+    const meta = new Map<string, { name: string; drawTime?: string | null; highlighted: boolean; key: number }>();
+    for (const c of allCharts) {
+      const s = slugify(c.chartName);
+      const k = dateKey(c.year, c.month, c.date);
+      const prev = meta.get(s);
+      if (!prev || k >= prev.key) meta.set(s, { name: c.chartName, drawTime: c.drawTime, highlighted: c.isHighlighted, key: k });
+    }
+    for (const mm of Array.from(meta.values())) {
+      const r = ensure(mm.name);
+      r.dbTime = r.dbTime || mm.drawTime;
+      if (!r.hasDb && mm.highlighted) r.highlighted = true;
+    }
+
+    const yKey = dateKey(yesterday.year, yesterday.month, yesterday.day);
+    // Remove markets whose entries are ALL inactive.
+    const hiddenSet = new Set(hiddenAll);
+    const list = Array.from(bySlug.values()).filter((r) => !hiddenSet.has(r.slug));
+
+    for (const r of list) {
+      if (r.hasDb) r.highlighted = r.dbHighlight;
+      const time = getDrawTime(r.slug, r.dbTime);
+      r.minutes = minutesOf(time);
+      r.timeLabel = fmtTimeLabel(time);
+      r.passed = nowMinutes >= r.minutes;
+      r.section = drawSection(r.minutes, nowMinutes);
+      r.today = r.passed ? (r.dbToday || MISSING_MARK) : UPCOMING_MARK;
+      const gen = firstEntryBySlug.get(r.slug);
+      if (r.dbYesterday) r.yesterday = r.dbYesterday;
+      else if (gen !== undefined && yKey < gen) r.yesterday = autoResult(r.slug, yesterday.day, yesterday.month, yesterday.year);
+      else r.yesterday = MISSING_MARK;
+    }
+
+    const live = list.filter((r) => r.section === "LIVE").sort((a, b) => b.minutes - a.minutes);
+    const next = list.filter((r) => r.section === "NEXT").sort((a, b) => a.minutes - b.minutes);
+    const rest = list.filter((r) => r.section === "REST").sort((a, b) => a.minutes - b.minutes);
+    return [
+      { label: "LIVE", rows: live },
+      { label: "NEXT", rows: next },
+      { label: "REST", rows: rest },
+    ].filter((s) => s.label === "LIVE" || s.rows.length > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayCharts, yesterdayCharts, allCharts, firstEntryBySlug, minuteKey, hiddenAll]);
+
+  /* ------------------ monthly chart: month/year live in URL ----------------- */
+  const [sel, setSel] = useState<{ month: number; year: number } | null>(null);
+  useLayoutEffect(() => {
+    const fromUrl = readSelFromUrl();
+    const t = istToday(istNow());
+    setSel(fromUrl || { month: t.month, year: t.year });
+  }, []);
+
+  const [monthCharts, setMonthCharts] = useState<ApiChart[]>([]);
+  useEffect(() => {
+    if (!sel) return;
+    let alive = true;
+    const key = `m-${sel.year}-${sel.month}`;
+    setMonthCharts(getCachedCharts(key) as ApiChart[]); // instant from cache
+    setHiddenMonth(getCachedHidden(key));
+    fetchChartsResilient(`/api/charts?year=${sel.year}&month=${sel.month}`, key).then((d) => {
+      if (!alive) return;
+      if (d) setMonthCharts(d as ApiChart[]);
+      setHiddenMonth(getCachedHidden(key));
+    });
+    return () => { alive = false; };
+  }, [sel]);
+
+  // Columns = DSWR | current | FRBD | GZBD | GALI | most-recent-result market.
+  const monthlyColumns = useMemo(() => {
+    const hiddenSet = new Set(hiddenAll);
+    const raw = [
+      { key: "desawar", label: "DSWR" },
+      { key: slug, label: canonical },
+      { key: "faridabad", label: "FRBD" },
+      { key: "ghaziabad", label: "GZBD" },
+      { key: "gali", label: "GALI" },
+      ...(recentSlug ? [{ key: recentSlug, label: titleFromSlug(recentSlug) }] : []),
+    ].filter((c) => !hiddenSet.has(c.key));
+    const seen = new Set<string>();
+    return raw.filter((c) => (seen.has(c.key) ? false : (seen.add(c.key), true)));
+  }, [slug, canonical, recentSlug, hiddenAll]);
+
+  const monthlyRows = useMemo(
+    () => (sel ? buildMonthlyRows(monthlyColumns, sel, monthCharts, today, nowMinutes, firstEntryBySlug, hiddenMonth) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sel, monthCharts, firstEntryBySlug, minuteKey, monthlyColumns, today.day, hiddenMonth]
+  );
+
+  const navigateMonth = (m: number, y: number) => {
+    window.location.assign(
+      `/${slug}/satta-result-chart/?ResultFor=${MONTH_NAMES[m - 1]}-${y}&month=${m}&year=${y}#mix-chart`
+    );
+  };
+
+  const selMonth = sel?.month ?? today.month;
+  const selYear = sel?.year ?? today.year;
+  const prevDate = new Date(selYear, selMonth - 2, 1);
+  const nextDate = new Date(selYear, selMonth, 1);
+  const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+
+  const companionNames = monthlyColumns.filter((c) => c.key !== slug).map((c) => titleFromSlug(c.key)).join(", ");
+  const tagline = `${canonical} Satta Result And Monthly Satta Chart of ${MONTH_NAMES[today.month - 1]} ${today.year} With Combined Chart of ${companionNames} From Dhan Kuber, Dhan Kuber Result, Dhan Kuber Chart and Dhan Kuber 786.`;
+
+  /* --------------------------------- render -------------------------------- */
+  return (
+    <div className="flex min-h-screen flex-col bg-[#ececec]">
+      <SiteHeader tagline={tagline} />
+
+      <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 pb-16">
+        <p suppressHydrationWarning className="mt-4 text-center text-sm text-[#16a34a]">
+          Updated: {MONTH_NAMES[now.getMonth()]} {now.getDate()}, {now.getFullYear()}, {clock} IST.
+        </p>
+
+        <div className="mt-6 space-y-6">
+          {/* companion table: current + 4 permanent + most-recent (minus hidden) */}
+          <LiveResultsTable
+            banner={`${canonical} Satta Result of ${longDate(today)} & ${longDate(yesterday)}`}
+            col1={`${weekdayOf(yesterday)}. ${ordinal(yesterday.day)}`}
+            col2={`${weekdayOf(today)}. ${ordinal(today.day)}`}
+            rows={booted ? rows : []}
+            showLive={false}
+          />
+
+          <Link
+            href="/"
+            className="block bg-[#3d3d3d] px-4 py-3 text-center text-sm font-medium text-white hover:bg-[#333] sm:text-base"
+          >
+            Click here for all Regional Offline Draw Results.
+          </Link>
+
+          <div className="bg-[#1565d8] px-4 py-3 text-center text-sm text-white sm:text-base">
+            <span className="mr-1 font-bold text-[#ff8a80]">New:</span>
+            Show your game at its original position of the next day
+          </div>
+
+          <div id="mix-chart">
+            <MonthlyChartTable
+              title={`${canonical} Satta Result Chart of ${MONTH_NAMES[selMonth - 1]} ${selYear} with ${companionNames}`}
+              columns={monthlyColumns}
+              rows={monthlyRows}
+              prevLabel={`${MONTH_SHORT[prevDate.getMonth()]} ${prevDate.getFullYear()}`}
+              nextLabel={`${MONTH_SHORT[nextDate.getMonth()]} ${nextDate.getFullYear()}`}
+              onPrev={() => navigateMonth(prevDate.getMonth() + 1, prevDate.getFullYear())}
+              onNext={() => navigateMonth(nextDate.getMonth() + 1, nextDate.getFullYear())}
+              latestLabel={`Click here to view the latest chart for ${companionNames} for ${MONTH_NAMES[today.month - 1]}-${today.year}`}
+              onLatest={() => navigateMonth(today.month, today.year)}
+              selectorLabel={`Select a month and year to view the combined chart for ${canonical}, ${companionNames}.`}
+              selectedMonth={selMonth}
+              selectedYear={selYear}
+              onGo={(m, y) => navigateMonth(m, y)}
+            />
+          </div>
+
+          {/* full daily results table (all markets), like the reference */}
+          <LiveResultsTable
+            banner={`Dhan Kuber Results of ${longDate(today)} & ${longDate(yesterday)}`}
+            col1={`${weekdayOf(yesterday)}. ${ordinal(yesterday.day)}`}
+            col2={`${weekdayOf(today)}. ${ordinal(today.day)}`}
+            sections={booted ? sections : []}
+            showFooter
+          />
+        </div>
+      </main>
+
+      <Footer />
+      <FloatingButtons />
+    </div>
+  );
+}
+
+============================================================
 FILE: src\components\home\MonthlyChartTable.tsx
 ============================================================
 
@@ -7955,12 +8809,18 @@ export function MonthlyChartTable({
       <div className="overflow-x-auto">
         <table className="w-full border-collapse bg-white text-center text-sm">
           <thead>
-            <tr className="bg-[#f2c900] text-gray-900">
-              <th className="border border-gray-300 px-2 py-2 font-bold text-[#e53935]">DATE</th>
-              {columns.map((c) => (
-                <th key={c.key} className="border border-gray-300 px-2 py-2 font-bold">{c.label}</th>
-              ))}
-            </tr>
+              <tr className="bg-[#f2c900] text-gray-900">
+                <th className="w-16 border border-gray-300 px-2 py-2 font-bold text-[#e53935]">DATE</th>
+                {columns.map((c) => (
+                  <th
+                    key={c.key}
+                    className="min-w-[120px] border border-gray-300 px-2 py-2 text-[13px] font-bold leading-tight whitespace-normal sm:text-sm"
+                    title={c.label}
+                  >
+                    {c.label}
+                  </th>
+                ))}
+              </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
@@ -8299,180 +9159,6 @@ FILE: src\components\home\SiteHeader.tsx
 
 import Link from "next/link";
 
-function DragonLogo() {
-  return (
-    <svg viewBox="0 0 200 200" className="h-16 w-16 sm:h-20 sm:w-20" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        {/* Main dragon body gradient - glossy metallic gold */}
-        <linearGradient id="dragonBody" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#FFD700" stop-opacity="1"/>
-          <stop offset="25%" stop-color="#FFA500" stop-opacity="1"/>
-          <stop offset="50%" stop-color="#FFD700" stop-opacity="1"/>
-          <stop offset="75%" stop-color="#FFA500" stop-opacity="1"/>
-          <stop offset="100%" stop-color="#FFD700" stop-opacity="1"/>
-        </linearGradient>
-        {/* Belly gradient - lighter */}
-        <linearGradient id="dragonBelly" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#FFF8DC" stop-opacity="0.9"/>
-          <stop offset="100%" stop-color="#FFD700" stop-opacity="0.7"/>
-        </linearGradient>
-        {/* Eye glow */}
-        <radialGradient id="eyeGlow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stop-color="#FF0000" stop-opacity="1"/>
-          <stop offset="60%" stop-color="#8B0000" stop-opacity="1"/>
-          <stop offset="100%" stop-color="#4B0000" stop-opacity="1"/>
-        </radialGradient>
-        {/* Highlight/shine effect */}
-        <linearGradient id="shine" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="rgba(255,255,255,0)" stop-opacity="0"/>
-          <stop offset="40%" stop-color="rgba(255,255,255,0.3)" stop-opacity="0.4"/>
-          <stop offset="50%" stop-color="rgba(255,255,255,0.6)" stop-opacity="0.6"/>
-          <stop offset="60%" stop-color="rgba(255,255,255,0.3)" stop-opacity="0.4"/>
-          <stop offset="100%" stop-color="rgba(255,255,255,0)" stop-opacity="0"/>
-        </linearGradient>
-        {/* Scale pattern */}
-        <pattern id="scalePattern" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse">
-          <ellipse cx="4" cy="4" rx="3" ry="2" fill="rgba(255,215,0,0.15)"/>
-        </pattern>
-        {/* Drop shadow filter */}
-        <filter id="dragonShadow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="2" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.3"/>
-        </filter>
-        {/* Inner glow for 3D effect */}
-        <filter id="innerGlow">
-          <feGaussianBlur stdDeviation="1" result="blur"/>
-          <feSpecularLighting surfaceScale="5" specularConstant="1" specularExponent="20" lighting-color="#FFF8DC" result="spec">
-            <fePointLight x="100" y="50" z="100"/>
-          </feSpecularLighting>
-          <feComposite in="SourceGraphic" in2="spec" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>
-        </filter>
-      </defs>
-
-      {/* Main dragon group with shadow */}
-      <g filter="url(#dragonShadow)">
-        {/* Dragon body - serpentine S-curve */}
-        <path 
-          d="M100,150 
-             Q130,130 150,100 
-             Q160,80 150,60 
-             Q140,40 120,30 
-             Q100,20 80,30 
-             Q60,40 50,60 
-             Q40,80 50,100 
-             Q60,120 40,140"
-          fill="url(#dragonBody)"
-          stroke="#B8860B"
-          stroke-width="1.5"
-          filter="url(#innerGlow)"
-        />
-        
-        {/* Dragon belly */}
-        <path 
-          d="M90,150 
-             Q115,130 130,100 
-             Q138,80 128,60 
-             Q118,40 100,30 
-             Q80,20 65,30 
-             Q50,40 45,60 
-             Q40,80 45,100 
-             Q50,120 55,140"
-          fill="url(#dragonBelly)"
-          stroke="rgba(218,165,32,0.3)"
-          stroke-width="0.5"
-        />
-
-        {/* Scales overlay on body */}
-        <path 
-          d="M100,150 
-             Q130,130 150,100 
-             Q160,80 150,60 
-             Q140,40 120,30 
-             Q100,20 80,30 
-             Q60,40 50,60 
-             Q40,80 50,100 
-             Q60,120 40,140"
-          fill="url(#scalePattern)"
-          opacity="0.6"
-        />
-
-        {/* Head - more detailed */}
-        <g transform="translate(40, 135)">
-          {/* Upper jaw */}
-          <path 
-            d="M0,0 Q25,-20 50,-10 Q60,10 60,30 Q50,40 30,40 Q10,40 -5,20 Q-10,10 -5,0 Z"
-            fill="url(#dragonBody)"
-            stroke="#B8860B"
-            stroke-width="1.5"
-          />
-          {/* Lower jaw */}
-          <path 
-            d="M0,0 Q20,15 40,15 Q50,20 45,35 Q35,40 15,30 Q5,15 -5,0 Z"
-            fill="url(#dragonBelly)"
-            stroke="#DAA520"
-            stroke-width="1"
-          />
-          
-          {/* Nostrils */}
-          <ellipse cx="8" cy="12" rx="2" ry="1.5" fill="#1a1a1a"/>
-          <ellipse cx="18" cy="10" rx="2" ry="1.5" fill="#1a1a1a"/>
-          
-          {/* Fierce eye with glow */}
-          <circle cx="20" cy="5" r="6" fill="url(#eyeGlow)"/>
-          <circle cx="20" cy="5" r="2.5" fill="#000"/>
-          {/* Eye highlight */}
-          <ellipse cx="18" cy="3" rx="1.5" ry="1" fill="rgba(255,255,255,0.8)"/>
-          
-          {/* Horns */}
-          <path d="M-5,10 Q-15,5 -20,-5 Q-15,-10 -5,-5 Z" fill="#2C1810" stroke="#1a1a1a" stroke-width="0.5"/>
-          <path d="M45,10 Q55,5 60,-5 Q55,-10 45,-5 Z" fill="#2C1810" stroke="#1a1a1a" stroke-width="0.5"/>
-          
-          {/* Spikes on head */}
-          <path d="M15,-5 Q20,-15 25,-5" fill="#B8860B" stroke="#8B6914" stroke-width="0.5"/>
-          <path d="M25,-5 Q30,-15 35,-5" fill="#B8860B" stroke="#8B6914" stroke-width="0.5"/>
-          <path d="M35,-5 Q40,-15 45,-5" fill="#B8860B" stroke="#8B6914" stroke-width="0.5"/>
-        </g>
-
-        {/* Spikes along spine */}
-        <g fill="#B8860B" stroke="#8B6914" stroke-width="0.5">
-          <path d="M90,140 Q100,125 100,115 Q90,105 85,115 Z"/>
-          <path d="M100,115 Q105,100 110,90 Q100,80 95,90 Z"/>
-          <path d="M110,90 Q120,75 125,65 Q115,55 110,65 Z"/>
-          <path d="M120,65 Q130,50 130,35 Q120,25 115,35 Z"/>
-        </g>
-
-        {/* Front claws */}
-        <g fill="#1a1a1a" stroke="#333" stroke-width="0.5">
-          {/* Left claw */}
-          <g transform="translate(70, 165)">
-            <path d="M0,0 L-5,15 L-10,15 L-15,25 L-5,15 Z"/>
-            <path d="M0,0 L5,15 L10,15 L15,25 L5,15 Z"/>
-            <path d="M0,0 L-2,15 L-7,15 L-12,25 L-2,15 Z"/>
-          </g>
-          {/* Right claw */}
-          <g transform="translate(110, 165)">
-            <path d="M0,0 L-5,15 L-10,15 L-15,25 L-5,15 Z"/>
-            <path d="M0,0 L5,15 L10,15 L15,25 L5,15 Z"/>
-            <path d="M0,0 L-2,15 L-7,15 L-12,25 L-2,15 Z"/>
-          </g>
-        </g>
-
-        {/* Fire breath effect */}
-        <g opacity="0.85">
-          <path d="M55,-5 Q70,-20 80,-30 Q90,-25 85,-15 Q70,-5 55,-5 Z" fill="#FF4500" filter="url(#dragonShadow)"/>
-          <path d="M58,-3 Q72,-15 85,-22 Q92,-15 88,-8 Q70,0 58,-3 Z" fill="#FF8C00"/>
-          <path d="M62,-2 Q70,-8 80,-12 Q85,-8 82,-4 Q68,0 62,-2 Z" fill="#FFD700" opacity="0.9"/>
-        </g>
-
-        {/* Glossy shine overlay - animated */}
-        <ellipse cx="100" cy="80" rx="80" ry="40" fill="url(#shine)" opacity="0.4"/>
-      </g>
-
-      {/* Subtle outer glow */}
-      <circle cx="100" cy="100" r="110" fill="none" stroke="rgba(255,215,0,0.15)" stroke-width="2" opacity="0.5"/>
-    </svg>
-  );
-}
-
 interface SiteHeaderProps {
   tagline: string;
 }
@@ -8482,12 +9168,25 @@ export function SiteHeader({ tagline }: SiteHeaderProps) {
     <header className="w-full pt-6 pb-2">
       <div className="mx-auto max-w-[1200px] px-4 text-center">
         <Link href="/" className="inline-flex items-center gap-3" aria-label="Dhan Kuber Home">
-          <DragonLogo />
-          <span className="font-serif text-3xl sm:text-5xl font-black tracking-tight text-gray-900">
+          {/* Red bull head emblem */}
+          <span className="dragon-badge">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="https://img.magnific.com/free-vector/vintage-strong-red-bull-head_225004-1579.jpg"
+              alt="Dhan Kuber red bull logo"
+              className="dragon-img"
+              draggable={false}
+            />
+            <span className="dragon-gloss" aria-hidden="true" />
+            <span className="dragon-rim" aria-hidden="true" />
+          </span>
+          <span className="font-serif text-3xl font-black tracking-tight text-gray-900 sm:text-5xl">
             Dhan-Kuber<span className="text-xl sm:text-3xl">.com</span>
           </span>
         </Link>
+
         <p className="mx-auto mt-4 max-w-4xl text-sm font-bold leading-relaxed text-gray-900">{tagline}</p>
+
         <div className="mt-4 bg-[#f0435f] px-6 py-4 text-center text-sm text-white">
           <span className="font-semibold">DISCLAIMER:</span> This website is an independent media portal for
           informational and journalistic purposes only. As a non-transactional service, we are not affiliated with
@@ -8801,7 +9500,7 @@ export function Footer() {
           <div>
             <Link href="/" className="flex items-center gap-2 mb-4" aria-label="Dhan Kuber Home">
               <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center">
-                <span className="text-white font-bold text-lg">SK</span>
+                <span className="text-white font-bold text-lg">OK</span>
               </div>
               <span className="font-bold text-xl text-white">Dhan Kuber</span>
             </Link>
@@ -8908,7 +9607,7 @@ export function Header({ announcements }: HeaderProps) {
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-2" aria-label="Dhan Kuber Home">
             <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center">
-              <span className="text-white font-bold text-lg">SK</span>
+              <span className="text-white font-bold text-lg">OK</span>
             </div>
             <span className="font-bold text-xl text-gray-900 hidden sm:block">Dhan Kuber</span>
           </Link>
@@ -8988,7 +9687,7 @@ export function Navigation({ announcements }: NavigationProps) {
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-2" aria-label="Dhan Kuber Home">
             <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center">
-              <span className="text-white font-bold text-lg">SK</span>
+              <span className="text-white font-bold text-lg">OK</span>
             </div>
             <span className="font-bold text-xl text-gray-900 hidden sm:block">Dhan Kuber</span>
           </Link>
@@ -9819,6 +10518,11 @@ FILE: src\lib\markets.ts
 
 /* ------------------------------- constants ------------------------------- */
 
+/** The 4 permanent "special" tables (monthly chart columns; admin may backfill past dates). */
+export const SPECIAL_MARKETS = ["Gali", "Desawar", "Faridabad", "Ghaziabad"];
+/** Slug mirrors of SPECIAL_MARKETS — keep both lists in sync. */
+export const SPECIAL_SLUGS = ["gali", "desawar", "faridabad", "ghaziabad"];
+
 export const teamNames: string[] = [
   "Gali Gharana", "Desawar Dabangs", "Faridabad Fauj", "Ghaziabad Gurkhas", "Delhi Dilwale", "Mumbai Maharajas", "Kolkata Kohinoors", "Chennai Chakravartis",
   "Bangalore Bahubalis", "Hyderabad Hanumans", "Pune Peshwas", "Ahmedabad Ashokas", "Jaipur Jantars", "Lucknow Lavas", "Kanpur Kesaris", "Nagpur Nagas",
@@ -9835,10 +10539,10 @@ export const teamNames: string[] = [
   "Belgaum Brahmos", "Ambattur Avatars", "Tirunelveli Thalapathis", "Malegaon Mavlas", "Gaya Gautams", "Jalgaon Jujhars", "Udaipur Udayans", "Maheshtala Mahadevs",
 ];
 
-/** Default markets = team names (so the home table shows a row for each team). */
+/** Default markets = team names (home daily table shows a row for each team). */
 export const DEFAULT_MARKETS = teamNames;
 
-/** Highlighting is 100% admin-controlled — nothing is highlighted by default. */
+/** Legacy: highlighting is 100% admin-controlled, so nothing is highlighted by default. */
 export const MAJOR_SLUGS: string[] = [];
 
 export const MONTH_NAMES = [
@@ -9850,9 +10554,9 @@ export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** Legacy grace window (kept for compatibility). */
 export const GRACE_MINUTES = 10;
-/** Shown when the draw time has passed but no admin result exists (on/after generation). */
+/** Draw time passed but no admin result. */
 export const MISSING_MARK = "--";
-/** Shown for upcoming draws (time not reached). Set to "❌" if you prefer the emoji. */
+/** Upcoming draw (time not reached). Set to "❌" if you prefer the emoji. */
 export const UPCOMING_MARK = "XX";
 
 /** LIVE = already drawn today; NEXT = upcoming within 6h; REST = later. */
@@ -9892,14 +10596,9 @@ export function escapeRegExp(s: string): string {
 
 /* -------------------------------- drawing -------------------------------- */
 
-/**
- * Reference schedule exactly as shown on the reference site (24h HH:MM).
- * Markets that share a time there keep sharing it here ("same time for 2+ tables").
- */
+/** Reference schedule exactly as shown on the reference site (24h HH:MM). */
 const REFERENCE_DRAW_TIMES: Record<string, string> = {
-  // Early morning / morning
   "noida-king": "01:15", "bikaner-super": "02:20", desawar: "05:00", "chotta-bazar": "05:30", "new-punjab": "11:10",
-  // Early afternoon
   "royal-bazar": "13:15", "gaj-kesri": "13:15", "super-king": "13:45", "matka-sone-ka": "13:55",
   "up-king": "14:00", "agra-bazar": "14:00", "rajdhani-jaipur": "14:00", "janta-city": "14:00",
   "mumbai-bazaar": "14:00", "ujala-super": "14:00", "new-jaipur-king": "14:00",
@@ -9907,20 +10606,16 @@ const REFERENCE_DRAW_TIMES: Record<string, string> = {
   "matka-king": "14:15", "jd-durga": "14:15", "jaipur-king": "14:20",
   "kalka-bazar": "14:30", savera: "14:30", "super-delhi": "14:30", "delhi-city": "14:30",
   "deep-sagar": "14:40", "delhi-dream": "14:40", "super-taj": "14:40", "meerut-metro": "14:45",
-  // Mid afternoon
   mohali: "15:00", "delhi-bazar": "15:00", "meerut-city": "15:00", "new-taj": "15:00", "new-delhi-darbar": "15:00",
   chennai: "15:05", "royal-challenge": "15:10", taj: "15:15", "super-bazar": "15:15", "delhi-bazar-day": "15:15",
   anarkali: "15:30", "maa-bhagwati": "15:30", "dubai-delhi": "15:45",
-  // Late afternoon
   "udaan-king": "16:00", "shiv-shakti": "16:05", "shri-ganesh": "16:30", "ghaziabad-din": "16:35", "shri-nagar": "16:35",
   "ds-number-1": "17:00", "mahalaxmi-bazar": "17:05", ahmedabad: "17:10", maharaj: "17:15", "uttarakhand-uk": "17:30",
-  // Evening
   faridabad: "18:00", "old-faridabad": "18:00", sadabahar: "18:00", "desawar-saam": "18:00", "old-ghaziabad": "18:00",
   "punjab-king": "19:15", neelkanth: "19:20",
   "shri-laxmi": "19:30", "old-city": "19:30", "mini-desawer": "19:30", "chotti-ghaziabad": "19:30",
   gurgaon: "19:35", "veera-king": "19:40", paras: "19:40", "farida-bazar": "19:40",
   "delhi-golden": "19:45", "mathura-city": "19:45", "dhan-kuber": "19:55", "bhavishyavani": "19:55",
-  // Night
   "shri-ji": "20:00", "shiv-shankar": "20:00", bharat: "20:00", nagpur: "20:00", "gali-bazar": "20:00",
   bangalore: "20:00", "punjab-laxmi": "20:00", "magadh-gold": "20:00",
   "vip-agra": "20:05", "mg-prime": "20:05",
@@ -9945,30 +10640,26 @@ function shiftTimes(times: Record<string, string>, deltaMinutes: number): Record
   return out;
 }
 
-/** Reference schedule − 30 minutes, for any legacy/reference-named markets. */
+/** Reference schedule − 30 minutes, for legacy/reference-named markets. */
 const DEFAULT_DRAW_TIMES: Record<string, string> = shiftTimes(REFERENCE_DRAW_TIMES, -30);
 
-/**
- * Schedule assigned to the team tables positionally, in alphabetical order, so the
- * top table (Agra Aadityas) draws at 01:30 PM and the reference's "same time for 2+
- * tables" groupings are preserved.
- */
+/** Team tables get the −30 min schedule positionally (alphabetical), preserving groupings. */
 const TEAM_SCHEDULE: string[] = [
-  "13:30", "13:30", "13:30", "13:30", "13:30", "13:30", "13:30",   // 7 tables @ 01:30 PM
-  "13:25", "13:15", "12:45", "12:45",                              // 01:25 / 01:15 / 12:45 ×2
-  "13:40", "13:40", "13:40", "13:45", "13:45", "13:50",            // 01:40 ×3 / 01:45 ×2 / 01:50
-  "14:00", "14:00", "14:00", "14:00", "14:10", "14:10", "14:10",   // 02:00 ×4 / 02:10 ×3
-  "14:15", "14:30", "14:30", "14:30", "14:30", "14:30", "14:35",   // 02:15 / 02:30 ×5 / 02:35
-  "14:40", "14:45", "14:45", "14:45", "15:00", "15:00", "15:15",   // 02:40 / 02:45 ×3 / 03:00 ×2 / 03:15
-  "15:30", "15:35", "16:00", "16:05", "16:05", "16:30", "16:35",   // 03:30 / 03:35 / 04:00 / 04:05 ×2 / 04:30 / 04:35
-  "16:40", "16:45", "17:00", "17:30", "17:30", "17:30", "17:30", "17:30", // 04:40 / 04:45 / 05:00 / 05:30 ×5
-  "18:45", "18:50", "19:00", "19:00", "19:00", "19:00", "19:05",   // 06:45 / 06:50 / 07:00 ×4 / 07:05
-  "19:10", "19:10", "19:10", "19:15", "19:15", "19:25", "19:25",   // 07:10 ×3 / 07:15 ×2 / 07:25 ×2
-  "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", // 07:30 ×8
-  "19:35", "19:35",                                                 // 07:35 ×2
-  "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", // 07:45 ×8
-  "19:50", "20:00", "20:00", "20:00", "20:05", "20:10",            // 07:50 / 08:00 ×3 / 08:05 / 08:10
-  "20:15", "20:15", "20:20", "20:30", "20:35",                     // 08:15 ×2 / 08:20 / 08:30 / 08:35
+  "13:30", "13:30", "13:30", "13:30", "13:30", "13:30", "13:30",
+  "13:25", "13:15", "12:45", "12:45",
+  "13:40", "13:40", "13:40", "13:45", "13:45", "13:50",
+  "14:00", "14:00", "14:00", "14:00", "14:10", "14:10", "14:10",
+  "14:15", "14:30", "14:30", "14:30", "14:30", "14:30", "14:35",
+  "14:40", "14:45", "14:45", "14:45", "15:00", "15:00", "15:15",
+  "15:30", "15:35", "16:00", "16:05", "16:05", "16:30", "16:35",
+  "16:40", "16:45", "17:00", "17:30", "17:30", "17:30", "17:30", "17:30",
+  "18:45", "18:50", "19:00", "19:00", "19:00", "19:00", "19:05",
+  "19:10", "19:10", "19:10", "19:15", "19:15", "19:25", "19:25",
+  "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", "19:30", "19:30",
+  "19:35", "19:35",
+  "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", "19:45", "19:45",
+  "19:50", "20:00", "20:00", "20:00", "20:05", "20:10",
+  "20:15", "20:15", "20:20", "20:30", "20:35",
 ];
 
 [...teamNames]
@@ -9977,6 +10668,7 @@ const TEAM_SCHEDULE: string[] = [
     DEFAULT_DRAW_TIMES[slugify(name)] = TEAM_SCHEDULE[i] ?? "12:00";
   });
 
+/** Admin-set time wins; otherwise the market's scheduled default. */
 export function getDrawTime(slug: string, dbTime?: string | null): string {
   if (dbTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(dbTime)) return dbTime;
   return DEFAULT_DRAW_TIMES[slug] || "12:00";
@@ -10032,7 +10724,7 @@ export function dateKey(y: number, m: number, d: number): number {
 
 /* ------------------------------ auto results ----------------------------- */
 
-/** Deterministic pseudo-random 2-digit value — used ONLY to backfill days before a market's generation. */
+/** Deterministic pseudo-random 2-digit value — backfill only, never today's reveal. */
 export function autoResult(seedKey: string, day: number, month: number, year: number): string {
   const seed = `${seedKey}-${day}-${month}-${year}`;
   let hash = 0;
@@ -10066,14 +10758,16 @@ export function taglineYears(): number[] {
   for (let y = 2015; y < cy; y++) out.push(y);
   return out;
 }
-/** Year options for selectors (2012 .. current, newest first). */
+/** Earliest year the site covers — used by every selector, URL guard and validator. */
+export const MIN_YEAR = 2015;
+
+/** Year options for selectors (2015 .. current, newest first). */
 export function yearOptions(): number[] {
   const cy = istNow().getFullYear();
   const out: number[] = [];
-  for (let y = 2012; y <= cy; y++) out.push(y);
+  for (let y = MIN_YEAR; y <= cy; y++) out.push(y);
   return out.reverse();
 }
-
 /* ------------------------------ monthly chart ---------------------------- */
 
 export interface MonthChartLite {
@@ -10090,13 +10784,19 @@ export interface MonthlyRowData {
 }
 
 /**
- * Monthly rows (day 1 → today for the current month; full month for past months).
- * Value rule per cell:
- *   1. admin entry for that day           -> admin result
- *   2. day BEFORE the market's generation -> auto-generated 2-digit number (backfill)
- *   3. day ON/AFTER generation, past      -> "--" (no admin result)
- *   4. today                              -> "--" if draw time passed else "XX"
- *   5. future                             -> "XX"
+ * Monthly rows: day 1 → today for the current month, full month for past months,
+ * nothing for future months.
+ *
+ * Cell rules (first match wins):
+ *   1. admin entry with a non-blank result   → that result
+ *   2. past day + SPECIAL 4                  → auto 2-digit (always backfilled)
+ *   3. past day + before market's generation → auto 2-digit
+ *   4. past day + on/after generation        → "--"
+ *   5. today                                 → "--" once draw time passed, else "XX"
+ *   6. future day                            → "XX"
+ *
+ * Draw time used for today's gate: the TODAY entry's time wins; otherwise the
+ * newest day's time within the selected month; otherwise the scheduled default.
  */
 export function buildMonthlyRows(
   columns: Array<{ key: string }>,
@@ -10104,20 +10804,30 @@ export function buildMonthlyRows(
   charts: MonthChartLite[],
   today: DayParts,
   nowMinutes: number,
-  firstEntry: Map<string, number>
+  firstEntry: Map<string, number>,
+  hidden: string[] = []
 ): MonthlyRowData[] {
+  const hiddenSet = new Set(hidden);
   const byKey = new Map<string, MonthChartLite>();
   const timeBySlug = new Map<string, string>();
+  const timeRank = new Map<string, number>();
+  const isCurrentMonth = sel.year === today.year && sel.month === today.month;
+
   for (const c of charts) {
     const s = slugify(c.chartName);
     byKey.set(`${s}|${c.date}`, c);
-    if (c.drawTime && !timeBySlug.has(s)) timeBySlug.set(s, c.drawTime);
+    if (!c.drawTime) continue;
+    const rank = isCurrentMonth && c.date === today.day ? 1_000_000 : c.date;
+    const prev = timeRank.get(s);
+    if (prev === undefined || rank > prev) {
+      timeRank.set(s, rank);
+      timeBySlug.set(s, c.drawTime);
+    }
   }
 
   const dim = daysInMonth(sel.year, sel.month);
   const monthStart = new Date(sel.year, sel.month - 1, 1).getTime();
   const currentMonthStart = new Date(today.year, today.month - 1, 1).getTime();
-  // current month → rows 01…today; past month → full month; future month → none
   const lastDay = monthStart > currentMonthStart ? 0 : monthStart === currentMonthStart ? today.day : dim;
   const todayTime = new Date(today.year, today.month - 1, today.day).getTime();
 
@@ -10126,18 +10836,25 @@ export function buildMonthlyRows(
     const values: Record<string, string> = {};
     const cellTime = new Date(sel.year, sel.month - 1, day).getTime();
     const cellKey = dateKey(sel.year, sel.month, day);
+
     for (const col of columns) {
       const db = byKey.get(`${col.key}|${day}`);
-      if (db) {
+      if (db && db.result && db.result.trim() !== "") {
         values[col.key] = db.result;
         continue;
       }
+
+      // Blank / pending / no entry → backfill or placeholder rules.
+      const isHidden = hiddenSet.has(col.key);
+      const isSpecial = SPECIAL_SLUGS.includes(col.key) && !isHidden;
       const gen = firstEntry.get(col.key);
-      const beforeGeneration = gen !== undefined && cellKey < gen;
-      if (beforeGeneration) {
-        values[col.key] = autoResult(col.key, day, sel.month, sel.year);
-      } else if (cellTime < todayTime) {
-        values[col.key] = MISSING_MARK;
+      const beforeGeneration = isHidden ? false : gen === undefined ? cellTime < todayTime : cellKey < gen;
+
+      if (cellTime < todayTime) {
+        values[col.key] =
+          isSpecial || beforeGeneration
+            ? autoResult(col.key, day, sel.month, sel.year)
+            : MISSING_MARK;
       } else if (cellTime === todayTime) {
         const mins = minutesOf(getDrawTime(col.key, timeBySlug.get(col.key)));
         values[col.key] = nowMinutes >= mins ? MISSING_MARK : UPCOMING_MARK;
@@ -10145,6 +10862,7 @@ export function buildMonthlyRows(
         values[col.key] = UPCOMING_MARK;
       }
     }
+
     rows.push({ date: day, values, red: charts.some((c) => c.date === day && c.isHighlighted) });
   }
   return rows;
@@ -10162,8 +10880,13 @@ export interface CacheableChart {
   isHighlighted: boolean;
   isActive: boolean;
   drawTime?: string | null;
+  updatedAt?: string;
 }
+
 const CACHE_KEY = "skf-charts-cache-v1";
+
+const HIDDEN_CACHE_KEY = "skf-charts-hidden-v1";
+
 function readCache(): Record<string, CacheableChart[]> {
   try {
     if (typeof window === "undefined") return {};
@@ -10172,6 +10895,7 @@ function readCache(): Record<string, CacheableChart[]> {
     return {};
   }
 }
+
 export function getCachedCharts(key: string): CacheableChart[] {
   try {
     return readCache()[key] || [];
@@ -10179,7 +10903,34 @@ export function getCachedCharts(key: string): CacheableChart[] {
     return [];
   }
 }
-/** A SUCCESSFUL response (even empty) is always stored so deletions propagate; failed fetches never touch the cache. */
+
+function readHiddenCache(): Record<string, string[]> {
+  try {
+    if (typeof window === "undefined") return {};
+    return JSON.parse(localStorage.getItem(HIDDEN_CACHE_KEY) || "{}") as Record<string, string[]>;
+  } catch {
+    return {};
+  }
+}
+export function getCachedHidden(key: string): string[] {
+  try {
+    return readHiddenCache()[key] || [];
+  } catch {
+    return [];
+  }
+}
+function setCachedHidden(key: string, slugs: string[]): void {
+  try {
+    if (typeof window === "undefined" || !Array.isArray(slugs)) return;
+    const cache = readHiddenCache();
+    cache[key] = slugs;
+    localStorage.setItem(HIDDEN_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** A SUCCESSFUL response (even empty) is stored so deletions propagate; failed fetches never touch the cache. */
 export function setCachedCharts(key: string, data: CacheableChart[]): void {
   try {
     if (typeof window === "undefined" || !Array.isArray(data)) return;
@@ -10190,6 +10941,7 @@ export function setCachedCharts(key: string, data: CacheableChart[]): void {
     /* storage blocked/full – ignore */
   }
 }
+
 /** Fetch with retries. Returns null ONLY when every attempt failed → caller keeps previous data. */
 export async function fetchChartsResilient(
   url: string,
@@ -10201,8 +10953,9 @@ export async function fetchChartsResilient(
       const res = await fetch(url, { cache: "no-store" });
       if (res.ok) {
         const d = await res.json();
-        if (d && d.success === true && Array.isArray(d.data)) {
+           if (d && d.success === true && Array.isArray(d.data)) {
           setCachedCharts(cacheKey, d.data);
+          setCachedHidden(cacheKey, Array.isArray(d.hidden) ? (d.hidden as string[]) : []);
           return d.data as CacheableChart[];
         }
       }
@@ -10279,62 +11032,96 @@ FILE: src\lib\validations.ts
 ============================================================
 
 import { z } from "zod";
+import { SPECIAL_SLUGS, slugify } from "./markets";
+
+/* -------------------------------- constants ------------------------------- */
+
+/** Earliest year the site covers (mirrors MIN_YEAR in markets.ts). */
+const MIN_YEAR = 2015;
+/** Latest allowed year — no future charts. */
+const MAX_YEAR = new Date().getFullYear();
+
+/* ---------------------------------- auth ---------------------------------- */
 
 export const loginSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
-const currentYear = new Date().getFullYear();
-const maxYear = currentYear;
+/* --------------------------------- charts --------------------------------- */
 
-// Base schema without refine (for partial updates)
+/** Base schema (no date refine) — reused for partial updates. */
 const chartBaseSchema = z.object({
   chartName: z.string().min(1, "Chart name is required").max(100, "Chart name too long"),
-  result: z.string().min(1, "Result is required").max(20, "Result too long"),
+
+  // Blank is allowed: pre-create the table now, publish the number later.
+  result: z.string().max(20, "Result too long").default(""),
   openingResult: z.string().max(20, "Opening result too long").optional().nullable(),
   closingResult: z.string().max(20, "Closing result too long").optional().nullable(),
+
   date: z.coerce.number().int().min(1).max(31, "Invalid date"),
   month: z.coerce.number().int().min(1).max(12, "Invalid month"),
-  year: z.coerce.number().int().min(2012).max(maxYear, `Year must be between 2012 and ${maxYear}`),
+  year: z.coerce
+    .number()
+    .int()
+    .min(MIN_YEAR, `Year must be ${MIN_YEAR} or later`)
+    .max(MAX_YEAR, `Year must be between ${MIN_YEAR} and ${MAX_YEAR}`),
+
   displayOrder: z.coerce.number().int().min(0).default(0),
   isHighlighted: z.boolean().default(false),
   isActive: z.boolean().default(true),
-  scheduledAt: z.string().optional().nullable().refine((val) => {
-    if (!val || val === "") return true; // Allow empty/null
-    return !isNaN(new Date(val).getTime()); // Must be valid date if provided
-  }, { message: "Invalid date time format", path: ["scheduledAt"] }),
-    drawTime: z
+
+  scheduledAt: z
+    .string()
+    .optional()
+    .nullable()
+    .refine(
+      (val) => {
+        if (!val || val === "") return true; // empty/null allowed
+        return !isNaN(new Date(val).getTime());
+      },
+      { message: "Invalid date time format", path: ["scheduledAt"] }
+    ),
+
+  drawTime: z
     .union([z.literal(""), z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Invalid draw time (HH:MM)")])
     .optional()
     .nullable(),
 });
 
-// Full schema with future date validation (for create)
-export const chartSchema = chartBaseSchema.refine((data) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const selectedDate = new Date(data.year, data.month - 1, data.date);
-  return selectedDate <= today;
-}, {
-  message: "Future dates are not allowed",
-  path: ["date"],
-});
+/** Create schema — blocks future dates; past backfill only for the Special 4. */
+export const chartSchema = chartBaseSchema.refine(
+  (data) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDate = new Date(data.year, data.month - 1, data.date);
+    if (selectedDate > today) return false;
+    if (selectedDate < today && !SPECIAL_SLUGS.includes(slugify(data.chartName))) return false;
+    return true;
+  },
+  {
+    message: "Future dates not allowed; past dates only for Gali, Desawar, Faridabad, Ghaziabad",
+    path: ["date"],
+  }
+);
 
-// Partial schema without future date check (for updates)
+/** Update schema — no future/past restriction (editing an existing row). */
 export const chartUpdateSchema = chartBaseSchema.partial();
 
+/** List/filter schema for the admin charts API. */
 export const chartFilterSchema = z.object({
   search: z.string().optional(),
   date: z.coerce.number().int().min(1).max(31).optional(),
   month: z.coerce.number().int().min(1).max(12).optional(),
-  year: z.coerce.number().int().min(2012).max(maxYear).optional(),
+  year: z.coerce.number().int().min(MIN_YEAR).max(MAX_YEAR).optional(),
   isActive: z.enum(["all", "true", "false"]).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   sortBy: z.enum(["createdAt", "displayOrder", "date", "chartName"]).default("displayOrder"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
 });
+
+/* --------------------------------- admins --------------------------------- */
 
 export const adminSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters").max(50),
@@ -10348,17 +11135,22 @@ export const updateAdminSchema = adminSchema.partial().omit({ password: true }).
   isActive: z.boolean().optional(),
 });
 
+/* ---------------------------------- types --------------------------------- */
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChartInput = z.infer<typeof chartSchema>;
 export type ChartFilterInput = z.infer<typeof chartFilterSchema>;
 export type AdminInput = z.infer<typeof adminSchema>;
 export type UpdateAdminInput = z.infer<typeof updateAdminSchema>;
 
-export function validateData<T>(schema: z.ZodSchema<T>, data: unknown): { success: true; data: T } | { success: false; errors: z.ZodError } {
+/* --------------------------------- helper --------------------------------- */
+
+export function validateData<T>(
+  schema: z.ZodSchema<T>,
+  data: unknown
+): { success: true; data: T } | { success: false; errors: z.ZodError } {
   const result = schema.safeParse(data);
-  if (result.success) {
-    return { success: true, data: result.data };
-  }
+  if (result.success) return { success: true, data: result.data };
   return { success: false, errors: result.error };
 }
 
@@ -10544,7 +11336,7 @@ export interface IChart extends Document {
   isHighlighted: boolean;
   isActive: boolean;
   scheduledAt?: Date; // When the result should be published
-  drawTime?: string;
+  drawTime?: string;  // 24h "HH:MM" — admin-set reveal time
   createdAt: Date;
   updatedAt: Date;
   formattedDate: string;
@@ -10558,9 +11350,10 @@ const chartSchema = new Schema<IChart>(
       trim: true,
       maxlength: 100,
     },
+    // Blank is allowed: pre-create the table now, publish the number later.
     result: {
       type: String,
-      required: true,
+      default: "",
       trim: true,
       maxlength: 20,
     },
@@ -10586,10 +11379,10 @@ const chartSchema = new Schema<IChart>(
       min: 1,
       max: 12,
     },
-    year: {
+      year: {
       type: Number,
       required: true,
-      min: 2012,
+      min: 2015,
       max: 2030,
     },
     displayOrder: {
@@ -10607,7 +11400,7 @@ const chartSchema = new Schema<IChart>(
     scheduledAt: {
       type: Date,
     },
-    drawTime: {        // 👈 ADD THIS BLOCK
+    drawTime: {
       type: String,
       trim: true,
     },
@@ -10633,7 +11426,6 @@ chartSchema.set("toJSON", { virtuals: true });
 chartSchema.set("toObject", { virtuals: true });
 
 const Chart: Model<IChart> = mongoose.models.Chart || mongoose.model<IChart>("Chart", chartSchema);
-
 export default Chart;
 
 ============================================================

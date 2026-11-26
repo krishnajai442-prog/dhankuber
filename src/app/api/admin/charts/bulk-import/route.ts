@@ -6,17 +6,19 @@ import { cookies } from "next/headers";
 import connectDB from "@/lib/mongodb";
 import Chart from "@/models/Chart";
 import { verifyToken } from "@/lib/auth";
-import { getDefaultDrawTime } from "@/lib/markets";
+import { daysInMonth, getDefaultDrawTime } from "@/lib/markets";
 
 /* DSWR / FRBD / GZBD / GALI → internal slugs (full names also accepted). */
 const COLUMN_MAP: Record<string, string> = {
   DSWR: "desawar", DESAWAR: "desawar", DESAWER: "desawar",
   FRBD: "faridabad", FARIDABAD: "faridabad",
+  HRKF: "haruf-king", HARUF: "haruf-king", HARUFKING: "haruf-king",
   GZBD: "ghaziabad", GHAZIABAD: "ghaziabad", GAZIABAD: "ghaziabad",
   GALI: "gali",
 };
 const NAMES: Record<string, string> = {
-  desawar: "Desawar", faridabad: "Faridabad", ghaziabad: "Ghaziabad", gali: "Gali",
+  desawar: "Desawar", faridabad: "Faridabad", "haruf-king": "Haruf King",
+  ghaziabad: "Ghaziabad", gali: "Gali",
 };
 const MONTHS = ["january","february","march","april","may","june","july","august","september","october","november","december"];
 
@@ -24,8 +26,11 @@ interface ParsedRow { year: number; month: number; day: number; values: Record<s
 
 /** Parses one OR many month blocks pasted together. */
 function parseChartText(text: string, fallback?: { month: number; year: number }) {
-  const rows: ParsedRow[] = [];
+   const rows: ParsedRow[] = [];
   const notes: string[] = [];
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const todayMs = midnight.getTime();
   let cur: { month: number; year: number } | null = fallback ?? null;
   let cols: (string | null)[] | null = null;
 
@@ -57,6 +62,14 @@ function parseChartText(text: string, fallback?: { month: number; year: number }
     }
     const day = parseInt(tokens[0], 10);
     if (day < 1 || day > 31) continue;
+    if (day > daysInMonth(cur.year, cur.month)) {
+      notes.push(`Skipped ${day}/${cur.month}/${cur.year} — that day does not exist in the month`);
+      continue;
+    }
+    if (new Date(cur.year, cur.month - 1, day).getTime() > todayMs) {
+      notes.push(`Skipped ${day}/${cur.month}/${cur.year} — future date, results are never pre-generated`);
+      continue;
+    }
 
     const values: Record<string, string> = {};
     cols.forEach((slug, i) => {

@@ -50,9 +50,14 @@ export async function POST() {
           continue;
         }
 
+          const isToday =
+          day.day === today.day && day.month === today.month && day.year === today.year;
+
         await Chart.create({
           chartName: name,
-          result: autoResult(slug, day.day, day.month, day.year),
+          // TODAY is created PENDING (blank) — only the admin publishes today's number.
+          // Past days keep a deterministic placeholder so history never looks empty.
+          result: isToday ? "" : autoResult(slug, day.day, day.month, day.year),
           date: day.day,
           month: day.month,
           year: day.year,

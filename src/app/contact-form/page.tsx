@@ -209,7 +209,7 @@ export default function ContactFormPage() {
             <CheckCircle2 className="mx-auto mb-4 h-16 w-16 text-green-600" aria-hidden="true" />
             <p className="text-lg font-semibold text-gray-900">{t.success}</p>
             <Link href="/" className="mt-6 inline-block text-sm font-medium text-blue-600 hover:underline">
-              ← Dhan-Kuber.com
+              ← onlinekhiwal.com
             </Link>
           </div>
         )}

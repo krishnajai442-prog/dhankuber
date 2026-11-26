@@ -67,7 +67,7 @@ export const chartSchema = chartBaseSchema.refine(
     return true;
   },
   {
-    message: "Future dates not allowed; past dates only for Gali, Desawar, Faridabad, Ghaziabad",
+      message: "Future dates not allowed; past dates only for Gali, Desawar, Faridabad, Haruf King, Ghaziabad",
     path: ["date"],
   }
 );

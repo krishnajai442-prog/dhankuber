@@ -26,7 +26,7 @@ export default function TermsPage() {
           <div className="prose prose-gray max-w-none space-y-8">
             <section>
               <h2 className="text-xl font-semibold text-gray-900 mb-3">1. AGREEMENT TO TERMS</h2>
-              <p>These Terms of Service ("Terms") constitute a legally binding agreement made between you ("the User") and the owners and operators of Dhan-Kuber.com ("we," "us," or "our"), concerning your access to and use of the Services. By accessing the Services, you agree that you have read, understood, and agree to be bound by these Terms. If you do not agree, you are prohibited from using the Services and must discontinue use immediately.</p>
+              <p>These Terms of Service ("Terms") constitute a legally binding agreement made between you ("the User") and the owners and operators of onlinekhiwal.com ("we," "us," or "our"), concerning your access to and use of the Services. By accessing the Services, you agree that you have read, understood, and agree to be bound by these Terms. If you do not agree, you are prohibited from using the Services and must discontinue use immediately.</p>
             </section>
 
             <section>

@@ -8,12 +8,12 @@ import { MonthlyChartTable } from "@/components/home/MonthlyChartTable";
 import { FloatingButtons } from "@/components/home/FloatingButtons";
 import { Footer } from "@/components/layout/Footer";
 import {
-  DEFAULT_MARKETS, MISSING_MARK, UPCOMING_MARK, MONTH_NAMES, MONTH_SHORT, addDays, autoResult,
-  buildMonthlyRows, dateKey, drawSection, firstEntryDates, fetchChartsResilient, getCachedCharts,
-  fmtTimeLabel, getDrawTime, istNow, istToday, longDate, minutesOf, ordinal, slugify,
-  titleFromSlug, weekdayOf, DrawSection,
-  MIN_YEAR,
+  DEFAULT_MARKETS, MISSING_MARK, UPCOMING_MARK, MONTH_NAMES, MONTH_SHORT, MIN_YEAR,
+  addDays, autoResult, buildMonthlyRows, dateKey, drawSection, firstEntryDates,
+  fetchChartsResilient, getCachedCharts, getCachedHidden, fmtTimeLabel, getDrawTime,
+  istNow, istToday, longDate, minutesOf, ordinal, slugify, titleFromSlug, weekdayOf, DrawSection,
 } from "@/lib/markets";
+import { PanditPromo } from "./PanditPromo";
 
 /* ---------------------------------- types --------------------------------- */
 
@@ -41,7 +41,7 @@ type RowState = LiveRow & {
 };
 
 /** The 4 permanent companion tables (local — no extra markets.ts export needed). */
-const SPECIAL_SLUGS = ["desawar", "faridabad", "ghaziabad", "gali"];
+const SPECIAL_SLUGS = ["desawar", "faridabad", "haruf-king", "ghaziabad", "gali"];
 
 /* --------------------------------- helpers -------------------------------- */
 
@@ -77,6 +77,8 @@ export function MarketChartClient({ slug }: { slug: string }) {
   const [todayCharts, setTodayCharts] = useState<ApiChart[]>([]);
   const [yesterdayCharts, setYesterdayCharts] = useState<ApiChart[]>([]);
   const [allCharts, setAllCharts] = useState<ApiChart[]>([]);
+  const [hiddenAll, setHiddenAll] = useState<string[]>([]);
+  const [hiddenMonth, setHiddenMonth] = useState<string[]>([]);
   const [booted, setBooted] = useState(false);
 
   useLayoutEffect(() => {
@@ -86,6 +88,7 @@ export function MarketChartClient({ slug }: { slug: string }) {
     if (y.length) setYesterdayCharts(y as ApiChart[]);
     const a = getCachedCharts("all-markets");
     if (a.length) setAllCharts(a as ApiChart[]);
+    setHiddenAll(getCachedHidden("all-markets"));
     setBooted(true);
   }, [todayKey, yesterdayKey]);
 
@@ -110,7 +113,9 @@ export function MarketChartClient({ slug }: { slug: string }) {
     let alive = true;
     const loadAll = async () => {
       const d = await fetchChartsResilient(`/api/charts`, "all-markets");
-      if (alive && d) setAllCharts(d as ApiChart[]);
+      if (!alive) return;
+      if (d) setAllCharts(d as ApiChart[]);
+      setHiddenAll(getCachedHidden("all-markets"));
     };
     loadAll();
     const ref = setInterval(loadAll, 60000);
@@ -121,7 +126,7 @@ export function MarketChartClient({ slug }: { slug: string }) {
 
   /* --------- extra entry: the market that declared its result most recently -- */
   const recentSlug = useMemo<string | null>(() => {
-    const exclude = new Set([slug, ...SPECIAL_SLUGS]);
+    const exclude = new Set([slug, ...SPECIAL_SLUGS, ...hiddenAll]);
     let bestSlug: string | null = null;
     let bestRank = -1;
     const consider = (c: ApiChart, dayOffset: number) => {
@@ -137,13 +142,15 @@ export function MarketChartClient({ slug }: { slug: string }) {
     for (const c of yesterdayCharts) consider(c, 0);
     return bestSlug;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayCharts, yesterdayCharts, slug, minuteKey]);
+  }, [todayCharts, yesterdayCharts, slug, minuteKey, hiddenAll]);
 
   /* ------------------- the companion table (6 rows) ------------------------- */
   const smallSlugs = useMemo(() => {
-    const list = [slug, ...SPECIAL_SLUGS, ...(recentSlug ? [recentSlug] : [])];
-    return Array.from(new Set(list.filter(Boolean)));
-  }, [slug, recentSlug]);
+    const hiddenSet = new Set(hiddenAll);
+    const list = [slug, ...SPECIAL_SLUGS, ...(recentSlug ? [recentSlug] : [])]
+      .filter((s): s is string => Boolean(s) && !hiddenSet.has(s));
+    return Array.from(new Set(list));
+  }, [slug, recentSlug, hiddenAll]);
 
   const rows = useMemo(() => {
     const bySlug = new Map<string, RowState>();
@@ -214,13 +221,20 @@ export function MarketChartClient({ slug }: { slug: string }) {
       r.dbTime = r.dbTime || c.drawTime;
     };
 
-    for (const c of yesterdayCharts) { const r = ensure(c.chartName); r.dbYesterday = c.result; absorb(r, c); }
-    for (const c of todayCharts) { const r = ensure(c.chartName); r.dbToday = c.result; r.dbTime = c.drawTime || null; absorb(r, c); }
-    for (const m of DEFAULT_MARKETS) ensure(m);
+        for (const c of yesterdayCharts) {
+      if (!SPECIAL_SLUGS.includes(slugify(c.chartName))) continue;
+      const r = ensure(c.chartName); r.dbYesterday = c.result; absorb(r, c);
+    }
+    for (const c of todayCharts) {
+      if (!SPECIAL_SLUGS.includes(slugify(c.chartName))) continue;
+      const r = ensure(c.chartName); r.dbToday = c.result; r.dbTime = c.drawTime || null; absorb(r, c);
+    }
+    for (const s of SPECIAL_SLUGS) ensure(titleFromSlug(s));
 
     const meta = new Map<string, { name: string; drawTime?: string | null; highlighted: boolean; key: number }>();
     for (const c of allCharts) {
       const s = slugify(c.chartName);
+      if (!SPECIAL_SLUGS.includes(s)) continue;
       const k = dateKey(c.year, c.month, c.date);
       const prev = meta.get(s);
       if (!prev || k >= prev.key) meta.set(s, { name: c.chartName, drawTime: c.drawTime, highlighted: c.isHighlighted, key: k });
@@ -232,7 +246,10 @@ export function MarketChartClient({ slug }: { slug: string }) {
     }
 
     const yKey = dateKey(yesterday.year, yesterday.month, yesterday.day);
-    const list = Array.from(bySlug.values());
+    // Remove markets whose entries are ALL inactive.
+    const hiddenSet = new Set(hiddenAll);
+    const list = Array.from(bySlug.values()).filter((r) => !hiddenSet.has(r.slug));
+
     for (const r of list) {
       if (r.hasDb) r.highlighted = r.dbHighlight;
       const time = getDrawTime(r.slug, r.dbTime);
@@ -256,7 +273,7 @@ export function MarketChartClient({ slug }: { slug: string }) {
       { label: "REST", rows: rest },
     ].filter((s) => s.label === "LIVE" || s.rows.length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayCharts, yesterdayCharts, allCharts, firstEntryBySlug, minuteKey]);
+  }, [todayCharts, yesterdayCharts, allCharts, firstEntryBySlug, minuteKey, hiddenAll]);
 
   /* ------------------ monthly chart: month/year live in URL ----------------- */
   const [sel, setSel] = useState<{ month: number; year: number } | null>(null);
@@ -271,31 +288,36 @@ export function MarketChartClient({ slug }: { slug: string }) {
     if (!sel) return;
     let alive = true;
     const key = `m-${sel.year}-${sel.month}`;
-    setMonthCharts(getCachedCharts(key) as ApiChart[]);
+    setMonthCharts(getCachedCharts(key) as ApiChart[]); // instant from cache
+    setHiddenMonth(getCachedHidden(key));
     fetchChartsResilient(`/api/charts?year=${sel.year}&month=${sel.month}`, key).then((d) => {
-      if (alive && d) setMonthCharts(d as ApiChart[]);
+      if (!alive) return;
+      if (d) setMonthCharts(d as ApiChart[]);
+      setHiddenMonth(getCachedHidden(key));
     });
     return () => { alive = false; };
   }, [sel]);
 
   // Columns = DSWR | current | FRBD | GZBD | GALI | most-recent-result market.
   const monthlyColumns = useMemo(() => {
-    const raw = [
+    const hiddenSet = new Set(hiddenAll);
+        const raw = [
       { key: "desawar", label: "DSWR" },
       { key: slug, label: canonical },
       { key: "faridabad", label: "FRBD" },
+      { key: "haruf-king", label: "HARUF KING" },
       { key: "ghaziabad", label: "GZBD" },
       { key: "gali", label: "GALI" },
       ...(recentSlug ? [{ key: recentSlug, label: titleFromSlug(recentSlug) }] : []),
-    ];
+    ].filter((c) => !hiddenSet.has(c.key));
     const seen = new Set<string>();
     return raw.filter((c) => (seen.has(c.key) ? false : (seen.add(c.key), true)));
-  }, [slug, canonical, recentSlug]);
+  }, [slug, canonical, recentSlug, hiddenAll]);
 
   const monthlyRows = useMemo(
-    () => (sel ? buildMonthlyRows(monthlyColumns, sel, monthCharts, today, nowMinutes, firstEntryBySlug) : []),
+    () => (sel ? buildMonthlyRows(monthlyColumns, sel, monthCharts, today, nowMinutes, firstEntryBySlug, hiddenMonth) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sel, monthCharts, firstEntryBySlug, minuteKey, monthlyColumns, today.day]
+    [sel, monthCharts, firstEntryBySlug, minuteKey, monthlyColumns, today.day, hiddenMonth]
   );
 
   const navigateMonth = (m: number, y: number) => {
@@ -311,7 +333,7 @@ export function MarketChartClient({ slug }: { slug: string }) {
   const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
 
   const companionNames = monthlyColumns.filter((c) => c.key !== slug).map((c) => titleFromSlug(c.key)).join(", ");
-  const tagline = `${canonical} Satta Result And Monthly Satta Chart of ${MONTH_NAMES[today.month - 1]} ${today.year} With Combined Chart of ${companionNames} From Dhan Kuber, Dhan Kuber Result, Dhan Kuber Chart and Dhan Kuber 786.`;
+  const tagline = `${canonical} Satta Result And Monthly Satta Chart of ${MONTH_NAMES[today.month - 1]} ${today.year} With Combined Chart of ${companionNames} From onlinekhiwal, onlinekhiwal Result, onlinekhiwal Chart and onlinekhiwal 786.`;
 
   /* --------------------------------- render -------------------------------- */
   return (
@@ -324,7 +346,7 @@ export function MarketChartClient({ slug }: { slug: string }) {
         </p>
 
         <div className="mt-6 space-y-6">
-          {/* companion table: current + 4 permanent + most-recent */}
+          {/* companion table: current + 4 permanent + most-recent (minus hidden) */}
           <LiveResultsTable
             banner={`${canonical} Satta Result of ${longDate(today)} & ${longDate(yesterday)}`}
             col1={`${weekdayOf(yesterday)}. ${ordinal(yesterday.day)}`}
@@ -339,6 +361,8 @@ export function MarketChartClient({ slug }: { slug: string }) {
           >
             Click here for all Regional Offline Draw Results.
           </Link>
+
+          <PanditPromo />
 
           <div className="bg-[#1565d8] px-4 py-3 text-center text-sm text-white sm:text-base">
             <span className="mr-1 font-bold text-[#ff8a80]">New:</span>
@@ -365,7 +389,7 @@ export function MarketChartClient({ slug }: { slug: string }) {
 
           {/* full daily results table (all markets), like the reference */}
           <LiveResultsTable
-            banner={`Dhan Kuber Results of ${longDate(today)} & ${longDate(yesterday)}`}
+            banner={`onlinekhiwal Results of ${longDate(today)} & ${longDate(yesterday)}`}
             col1={`${weekdayOf(yesterday)}. ${ordinal(yesterday.day)}`}
             col2={`${weekdayOf(today)}. ${ordinal(today.day)}`}
             sections={booted ? sections : []}

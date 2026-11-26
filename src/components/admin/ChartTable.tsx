@@ -66,8 +66,10 @@ export function ChartTable({
 }: ChartTableProps) {
   const [deleteConfirm, setDeleteConfirm] = useState<ChartData | null>(null);
   const [renameTarget, setRenameTarget] = useState<ChartData | null>(null);
+  const [deleteMarketTarget, setDeleteMarketTarget] = useState<ChartData | null>(null);
   const [newName, setNewName] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
+  const [isDeletingMarket, setIsDeletingMarket] = useState(false);
 
   /* -------------------------------- handlers ------------------------------- */
 
@@ -101,6 +103,7 @@ export function ChartTable({
       if (data.success) {
         alert(data.message);
         setRenameTarget(null);
+        setNewName("");
         onPageChange(pagination.page); // refresh the list
       } else {
         alert(data.message || "Failed to rename market");
@@ -109,6 +112,32 @@ export function ChartTable({
       alert("An error occurred while renaming");
     } finally {
       setIsRenaming(false);
+    }
+  };
+
+  /** Deletes ALL entries of this market across all dates. */
+  const handleDeleteMarket = async () => {
+    if (!deleteMarketTarget) return;
+    setIsDeletingMarket(true);
+    try {
+      const res = await fetch("/api/admin/charts/delete-market", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ marketName: deleteMarketTarget.chartName }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message);
+        setDeleteMarketTarget(null);
+        setNewName("");
+        onPageChange(pagination.page); // refresh the list
+      } else {
+        alert(data.message || "Failed to delete market");
+      }
+    } catch {
+      alert("An error occurred while deleting");
+    } finally {
+      setIsDeletingMarket(false);
     }
   };
 
@@ -158,7 +187,7 @@ export function ChartTable({
               <th scope="col" className="w-40">Scheduled</th>
               <th scope="col" className="w-40">Updated</th>
               <th scope="col" className="w-40">Status</th>
-              <th scope="col" className="w-40">Actions</th>
+              <th scope="col" className="w-48">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -198,7 +227,7 @@ export function ChartTable({
                     {chart.stale && <span className="badge badge-warning ml-2">Needs update</span>}
                   </td>
                   <td className="whitespace-nowrap text-gray-600">{chart.formattedDate}</td>
-                     <td className="font-mono text-lg font-bold text-primary-700">
+                  <td className="font-mono text-lg font-bold text-primary-700">
                     {chart.result ? chart.result : <span className="badge badge-warning">Pending</span>}
                   </td>
                   <td className="text-gray-600">{chart.displayOrder}</td>
@@ -249,6 +278,7 @@ export function ChartTable({
                         onClick={() => onView(chart)}
                         className="h-8 w-8 p-0"
                         aria-label="View details"
+                        title="View details"
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
@@ -267,7 +297,8 @@ export function ChartTable({
                         size="sm"
                         onClick={() => onEdit(chart)}
                         className="h-8 w-8 p-0"
-                        aria-label="Edit chart"
+                        aria-label="Edit this entry"
+                        title="Edit this single entry"
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -275,10 +306,24 @@ export function ChartTable({
                         variant="ghost"
                         size="sm"
                         onClick={() => handleDeleteClick(chart)}
-                        className="h-8 w-8 p-0 text-danger-600 hover:bg-danger-50"
-                        aria-label="Delete chart"
+                        className="h-8 w-8 p-0 text-orange-600 hover:bg-orange-50"
+                        aria-label="Delete this entry"
+                        title="Delete this single entry"
                       >
                         <Trash2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setDeleteMarketTarget(chart);
+                          setNewName("");
+                        }}
+                        className="h-8 w-8 p-0 text-red-700 hover:bg-red-100"
+                        aria-label="Delete entire market (all entries)"
+                        title="Delete ALL entries of this market across all dates"
+                      >
+                        <Trash2 className="h-5 w-5" />
                       </Button>
                     </div>
                   </td>
@@ -320,7 +365,10 @@ export function ChartTable({
       {/* rename market modal */}
       <Modal
         isOpen={!!renameTarget}
-        onClose={() => setRenameTarget(null)}
+        onClose={() => {
+          setRenameTarget(null);
+          setNewName("");
+        }}
         title={`Rename Market: ${renameTarget?.chartName ?? ""}`}
         size="sm"
       >
@@ -336,7 +384,15 @@ export function ChartTable({
           autoFocus
         />
         <div className="mt-6 flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={() => setRenameTarget(null)} disabled={isRenaming}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setRenameTarget(null);
+              setNewName("");
+            }}
+            disabled={isRenaming}
+          >
             Cancel
           </Button>
           <Button
@@ -351,16 +407,70 @@ export function ChartTable({
         </div>
       </Modal>
 
-      {/* delete confirmation */}
+      {/* delete single entry confirmation */}
       <ConfirmModal
         isOpen={!!deleteConfirm}
         onClose={() => setDeleteConfirm(null)}
         onConfirm={handleDeleteConfirm}
-        title="Delete Chart"
+        title="Delete Entry"
         message={`Are you sure you want to delete "${deleteConfirm?.chartName}" for ${deleteConfirm?.formattedDate}? This action cannot be undone.`}
         confirmText="Delete"
         variant="danger"
       />
+
+      {/* delete entire market modal */}
+      <Modal
+        isOpen={!!deleteMarketTarget}
+        onClose={() => {
+          setDeleteMarketTarget(null);
+          setNewName("");
+        }}
+        title={`Delete Entire Market: ${deleteMarketTarget?.chartName ?? ""}`}
+        size="sm"
+      >
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm font-semibold text-red-800">⚠️ WARNING: Destructive Action</p>
+          <p className="mt-2 text-sm text-red-700">
+            This will delete <strong>ALL entries</strong> of &quot;{deleteMarketTarget?.chartName}&quot; across
+            <strong> all dates</strong> — the entire history will be permanently removed.
+          </p>
+          <p className="mt-2 text-sm text-red-700">
+            This action <strong>cannot be undone</strong>.
+          </p>
+        </div>
+        <p className="mb-4 text-sm text-gray-600">
+          Type the market name to confirm deletion:
+        </p>
+        <Input
+          label={`Type "${deleteMarketTarget?.chartName}" to confirm`}
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder={deleteMarketTarget?.chartName}
+          autoFocus
+        />
+        <div className="mt-6 flex justify-end gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setDeleteMarketTarget(null);
+              setNewName("");
+            }}
+            disabled={isDeletingMarket}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={handleDeleteMarket}
+            loading={isDeletingMarket}
+            disabled={newName.trim() !== deleteMarketTarget?.chartName}
+          >
+            Delete Entire Market
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
